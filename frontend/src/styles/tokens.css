@@ -1,0 +1,54 @@
+:root,
+[data-theme="light"] {
+  --paper: #fafbff;
+  --paper-2: #f0f3fc;
+  --paper-3: #e5eaf8;
+  --grid: #dce3f7;
+  --ink: #2540d9;
+  --ink-text: #ffffff;
+  --text: #1b2033;
+  --text-muted: #566079;
+  --margin: #c4262d;
+  --margin-text: #ffffff;
+  --highlight: #ffe14d;
+  --good: #1d7a53;
+  --border: #cfd7ee;
+  --shadow: 0 1px 2px rgb(20 30 70 / 0.08), 0 10px 30px rgb(20 30 70 / 0.12);
+  --radius: 10px;
+  --chat-bg: linear-gradient(var(--paper), var(--paper));
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --paper: #141e1b;
+  --paper-2: #1a2723;
+  --paper-3: #22332e;
+  --grid: #263631;
+  --ink: #9db0ff;
+  --ink-text: #0f1730;
+  --text: #e8ede4;
+  --text-muted: #a5b2aa;
+  --margin: #ff8c84;
+  --margin-text: #2a0a08;
+  --highlight: #f4dc6b;
+  --good: #7fd8a8;
+  --border: #33463f;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root {
+  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ink-soft: color-mix(in srgb, var(--ink) 14%, var(--paper));
+  --margin-soft: color-mix(in srgb, var(--margin) 14%, var(--paper));
+  --mention-soft: color-mix(in srgb, var(--highlight) 32%, transparent);
+  --grid-line: color-mix(in srgb, var(--grid) 70%, transparent);
+  --margin-line: color-mix(in srgb, var(--margin) 50%, transparent);
+  --header-h: 56px;
+  --rail-w: 72px;
+  --sidebar-w: 256px;
+  --members-w: 240px;
+  --chat-scale: 1;
+}

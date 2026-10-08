@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pollakcord
+      POSTGRES_USER: pollakcord
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pollakcord -d pollakcord"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POLLAKCORD_DATABASE_URL: postgresql+asyncpg://pollakcord:${POSTGRES_PASSWORD}@db:5432/pollakcord
+    volumes:
+      - uploads:/app/backend/data/uploads
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      POLLAKCORD_DOMAIN: ${POLLAKCORD_DOMAIN:?set POLLAKCORD_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  coturn:
+    image: coturn/coturn:4.6
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--realm=${POLLAKCORD_DOMAIN}"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${POLLAKCORD_TURN_SECRET}"
+      - "--fingerprint"
+      - "--no-cli"
+      - "--min-port=49160"
+      - "--max-port=49200"
+
+volumes:
+  dbdata:
+  uploads:
+  caddy_data:
+  caddy_config:
