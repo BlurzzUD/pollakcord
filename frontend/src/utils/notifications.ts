@@ -1,4 +1,5 @@
 import type { AppNotification } from "../api/types";
+import { placeLabel, roleLabel } from "./dok";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -25,5 +26,14 @@ export function describeNotification(t: Translate, notification: AppNotification
         text: t(`notifications.moderation_${String(p.kind)}`, { server: p.server_name, minutes: p.minutes, channel: p.channel_name }),
         href: null,
       };
+    case "dok_message": {
+      const label = roleLabel(t, p.author_role);
+      const place = placeLabel(t, p.scope, p.class_code);
+      const preview = typeof p.preview === "string" ? p.preview : "";
+      return {
+        text: preview ? t("notifications.dok_message_preview", { label, place, preview }) : t("notifications.dok_message", { label, place }),
+        href: `/app/dok/${p.thread_id}`,
+      };
+    }
   }
 }

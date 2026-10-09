@@ -1,5 +1,6 @@
 from .audit import AuditLog, Notification
 from .auth import AuthMethod, AuthSession, RecoveryCode, TotpConfig
+from .dok import DokMessage, DokThread
 from .message import (
     Conversation,
     DataKey,
@@ -35,6 +36,8 @@ __all__ = [
     "Channel",
     "Conversation",
     "DataKey",
+    "DokMessage",
+    "DokThread",
     "FriendRequest",
     "Friendship",
     "Invite",

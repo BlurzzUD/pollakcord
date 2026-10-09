@@ -13,6 +13,7 @@ import { PageHeader } from "../components/PageHeader";
 import { TextField } from "../components/Field";
 import { useAuth } from "../store/auth";
 import { formatDateTime } from "../utils/format";
+import { isStaffRole } from "../utils/roles";
 
 type Tab = "reports" | "users" | "messages" | "audit";
 
@@ -205,7 +206,7 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
             <button type="button" className="button button--small" onClick={() => setReveal(user)}>
               {t("moderation.reveal")}
             </button>
-            {isAdmin && user.platform_role === "user" ? (
+            {isAdmin && !isStaffRole(user.platform_role) ? (
               <button type="button" className="button button--small button--danger-ghost" onClick={() => setTarget({ user, next: user.status === "suspended" ? "active" : "suspended" })}>
                 {user.status === "suspended" ? t("moderation.restore") : t("moderation.suspend")}
               </button>
@@ -295,7 +296,7 @@ export function ModerationPage() {
   const isAdmin = me?.platform_role === "school_admin";
   const [tab, setTab] = useState<Tab>("reports");
   const tabs: Tab[] = isAdmin ? ["reports", "users", "messages", "audit"] : ["reports", "users", "messages"];
-  if (!me || me.platform_role === "user") {
+  if (!me || !isStaffRole(me.platform_role)) {
     return <EmptyState icon="warning" title={t("errors.not_found")} />;
   }
   return (

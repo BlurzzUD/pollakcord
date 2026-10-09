@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db.types import utcnow
 from ...errors import AppError
 from ...models import AuthMethod, AuthSession, RecoveryCode, SchoolClass, Theme, User
-from ...models.enums import ClassVisibility, SessionScope
+from ...models.enums import ClassVisibility, PlatformRole, SessionScope
 from ...security.ratelimit import enforce
 from ...security.sessions import revoke_session
 from ...services import accounts
@@ -25,7 +25,7 @@ HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 GRADIENT = re.compile(r"^linear-gradient\(\s*\d{1,3}deg\s*,\s*#[0-9a-fA-F]{6}\s*,\s*#[0-9a-fA-F]{6}\s*\)$")
 THEME_COLOR_KEYS = ("bg", "bg_alt", "bg_deep", "text", "text_muted", "accent", "accent_text", "danger", "mention", "border")
 THEME_KEYS = THEME_COLOR_KEYS + ("background", "radius")
-NOTIFICATION_KEYS = ("friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "sounds")
+NOTIFICATION_KEYS = ("friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "dok", "sounds")
 MAX_THEMES = 12
 
 
@@ -66,6 +66,11 @@ class ThemeBody(BaseModel):
 
 class ReauthBody(BaseModel):
     current_secret: str = Field(min_length=1, max_length=256)
+
+
+def ensure_class_unlocked(user: User, new_class_id: int | None) -> None:
+    if user.platform_role == PlatformRole.DOK_REPRESENTATIVE.value and new_class_id != user.school_class_id:
+        raise AppError("dok_class_locked", 403)
 
 
 def clean_bio(raw: str) -> str:
@@ -172,8 +177,10 @@ async def set_class(body: ClassBody, auth: Auth = Depends(require_auth), db: Asy
         school_class = await db.get(SchoolClass, int(body.class_id))
         if school_class is None or not school_class.is_active:
             raise AppError("not_found", 404)
+        ensure_class_unlocked(auth.user, school_class.id)
         auth.user.school_class_id = school_class.id
     else:
+        ensure_class_unlocked(auth.user, None)
         auth.user.school_class_id = None
     row.class_visibility = body.visibility
     row.class_prompt_answered = True

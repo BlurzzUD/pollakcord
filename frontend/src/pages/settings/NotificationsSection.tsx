@@ -5,7 +5,7 @@ import { Toggle } from "../../components/Field";
 import { useAuth } from "../../store/auth";
 import { useSaveSettings } from "./useSaveSettings";
 
-const KEYS: (keyof NotificationPrefs)[] = ["friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "sounds"];
+const KEYS: (keyof NotificationPrefs)[] = ["friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "dok", "sounds"];
 
 export function NotificationsSection() {
   const { t } = useTranslation();

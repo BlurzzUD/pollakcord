@@ -11,6 +11,11 @@ class PlatformRole(StrEnum):
     USER = "user"
     SCHOOL_MODERATOR = "school_moderator"
     SCHOOL_ADMIN = "school_admin"
+    DOK_REPRESENTATIVE = "dok_representative"
+    DOK_PRESIDENT = "dok_president"
+
+
+STAFF_ROLES = frozenset({PlatformRole.SCHOOL_MODERATOR.value, PlatformRole.SCHOOL_ADMIN.value})
 
 
 class AuthMethodKind(StrEnum):
@@ -91,6 +96,11 @@ class ScopeKind(StrEnum):
     CHANNEL = "channel"
 
 
+class DokScope(StrEnum):
+    CLASS = "class"
+    SCHOOL = "school"
+
+
 class RoleKind(StrEnum):
     MEMBER = "member"
     MODERATOR = "moderator"
@@ -113,6 +123,7 @@ class NotificationType(StrEnum):
     CALL_INCOMING = "call_incoming"
     CALL_MISSED = "call_missed"
     MODERATION = "moderation"
+    DOK_MESSAGE = "dok_message"
 
 
 class AuditAction(StrEnum):
@@ -145,3 +156,4 @@ class AuditAction(StrEnum):
     PLATFORM_USER_STATUS = "platform.user_status"
     PLATFORM_REPORT_VIEW = "platform.report_view"
     ACCOUNT_RECOVERY = "account.recovery"
+    DOK_MESSAGE_SEND = "dok.message_send"

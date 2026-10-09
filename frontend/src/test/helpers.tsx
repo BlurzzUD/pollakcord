@@ -28,7 +28,7 @@ export function makeMe(overrides: Partial<Me> = {}, settings: Partial<Me["settin
       custom_css: "",
       developer_mode: false,
       chat_appearance: { density: "cozy", font_scale: 100, show_timestamps: true },
-      notification_prefs: { friend_requests: true, direct_messages: true, mentions: true, server: true, calls: true, moderation: true, sounds: false },
+      notification_prefs: { friend_requests: true, direct_messages: true, mentions: true, server: true, calls: true, moderation: true, dok: true, sounds: false },
       privacy: {
         friend_requests: "everyone",
         direct_messages: "shared_servers",

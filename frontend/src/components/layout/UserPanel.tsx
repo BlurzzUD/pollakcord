@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { useNotifications } from "../../api/hooks";
 import { useAuth } from "../../store/auth";
 import { useLive } from "../../store/live";
+import { isStaffRole } from "../../utils/roles";
 import { Avatar } from "../Avatar";
 import { CopyId } from "../CopyId";
 import { Icon } from "../Icon";
@@ -32,7 +33,7 @@ export function UserPanel() {
         <Icon name="bell" />
         {unread > 0 ? <span className="badge-dot">{unread > 9 ? "9+" : unread}</span> : null}
       </button>
-      {me.platform_role !== "user" ? (
+      {isStaffRole(me.platform_role) ? (
         <Link className="icon-button" to="/app/moderation" aria-label={t("moderation.title")} title={t("moderation.title")}>
           <Icon name="gavel" />
         </Link>

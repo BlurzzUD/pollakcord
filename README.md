@@ -48,6 +48,7 @@ A Discord-style communication platform built for one school. Students prove they
 | Profiles | Avatar, banner, display name, username, bio, join date, class (only if the user chose to show it), presence, mutual friends, shared servers, user ID (developer mode) |
 | Friends | Requests, accept/decline/cancel, remove, block, presence per privacy, class-based suggestions (only between users who both opted in) |
 | Direct messages | Text, replies, reactions, delete own, timestamps, read/unread, report, block, voice calls |
+| DÖK messages | Student-government announcements in their own inbox next to Friends and Direct messages. Recipients see only the role (*DÖK képviselő* / *DÖK elnök*), never the sender; the server always stores the real author. Each message creates a notification that can be dismissed after three seconds |
 | Servers | Create/join/leave, invites (`/invite/<code>`), categories, text and voice channels, roles (Owner, Administrator, Moderator, Member + custom), 18 permissions, per-category and per-channel overwrites, pins, slowmode, timeouts, kick/ban, audit log, server reports |
 | Voice | WebRTC peer-to-peer mesh, end-to-end encrypted (DTLS-SRTP), speaking indicators, mute/deafen, server-side mute/deafen requests, DM calls with ringing, call security code |
 | Search | Friends, users, servers, channels and messages (permission-filtered, accent-insensitive whole-word message search over encrypted data) |
@@ -130,7 +131,7 @@ pollakcord/
 ├── backend/
 │   ├── alembic.ini  pytest.ini  requirements.txt  requirements-dev.txt
 │   ├── docker/entrypoint.sh
-│   ├── migrations/                 env.py, script.py.mako, versions/0001_initial_schema.py
+│   ├── migrations/                 env.py, script.py.mako, versions/0001_initial_schema.py, 0002_dok_messaging.py
 │   ├── app/
 │   │   ├── main.py  config.py  cli.py  seed.py  spa.py  ids.py  i18n.py  errors.py  logging_config.py
 │   │   ├── locales/                hu.json  en.json  de.json     (API error messages, server defaults)
@@ -326,7 +327,7 @@ CREATE DATABASE pollakcord OWNER pollakcord ENCODING 'UTF8';
 
 Set `POLLAKCORD_DATABASE_URL=postgresql+asyncpg://pollakcord:change-me@db-host:5432/pollakcord`, then run the migrations ([section 8](#8-database-migrations)). Docker Compose does all of this for you.
 
-### Schema overview (33 tables)
+### Schema overview (35 tables)
 
 | Group | Tables |
 | --- | --- |
@@ -334,7 +335,7 @@ Set `POLLAKCORD_DATABASE_URL=postgresql+asyncpg://pollakcord:change-me@db-host:5
 | Authentication | `auth_methods` (password hash, lockout counters), `totp_configs` (encrypted secret), `recovery_codes` (hashed), `sessions` (hashed tokens) |
 | Social | `friendships`, `friend_requests`, `blocks` |
 | Servers | `servers`, `roles`, `server_members`, `member_roles`, `categories`, `channels`, `permission_overwrites`, `invites`, `bans` |
-| Messaging | `conversations`, `data_keys`, `messages` (metadata), `message_contents` (ciphertext), `message_reactions`, `read_states`, `message_mentions`, `message_search_tokens` |
+| Messaging | `conversations`, `data_keys`, `messages` (metadata), `message_contents` (ciphertext), `message_reactions`, `read_states`, `message_mentions`, `message_search_tokens`, `dok_threads`, `dok_messages` (ciphertext) |
 | Moderation | `reports` (encrypted snapshots), `audit_logs`, `notifications` |
 
 IDs are time-ordered 63-bit snowflakes, returned to clients as strings. Invite codes are 10 random base-62 characters (about 60 bits).
@@ -352,6 +353,7 @@ alembic current
 ```
 
 - `migrations/versions/0001_initial_schema.py` creates every table and **seeds the 12 classes**: 9A, 9B, 10A, 10B, 11A, 11B, 12A, 12B, 13A, 13B, 14A, 14B.
+- `migrations/versions/0002_dok_messaging.py` adds `dok_threads` and `dok_messages`. It is additive: no existing table is changed.
 - A test asserts that the migrated schema is exactly what the models describe.
 
 ### Changing the classes later
@@ -451,7 +453,7 @@ The script has the institute code `hszc-pollak` hard-coded and mimics a browser 
 | `uvicorn app.main:build_default_app --factory --reload --port 8000 --ws-max-size 65536` | Run the API |
 | `python -m app generate-key` | Print a new random key (for `MASTER_KEY` / `PEPPER`) |
 | `python -m app seed` | Ensure the default classes exist |
-| `python -m app grant-role <username> <role>` | Set a platform role: `user`, `school_moderator`, `school_admin` |
+| `python -m app grant-role <username> <role>` | Set a platform role: `user`, `school_moderator`, `school_admin`, `dok_representative` (the account must already have a class), `dok_president` |
 | `pytest` | Run the backend test suite |
 
 Interactive API docs (not in production): <http://localhost:8000/api/docs>.
@@ -594,7 +596,7 @@ Do not enable HTTP compression for API responses that mix secrets with attacker-
 
 Client operations: `ping`, `subscribe`, `unsubscribe`, `typing`, `voice.join`, `voice.leave`, `voice.signal`, `voice.state`, `voice.moderate`, `call.invite`, `call.accept`, `call.decline`, `call.cancel`.
 
-Server events (envelope `{ "t": <event>, "d": <data> }`): `ready`, `message.create`, `message.delete`, `reaction.update`, `message.pin`, `typing`, `presence.update`, `friend.request|added|removed`, `notification.create`, `server.joined|removed|updated`, `structure.changed`, `member.joined|left|updated`, `role.changed`, `channel.activity`, `read.update`, `voice.*`, `call.*`, `error`.
+Server events (envelope `{ "t": <event>, "d": <data> }`): `ready`, `message.create`, `message.delete`, `reaction.update`, `message.pin`, `typing`, `presence.update`, `friend.request|added|removed`, `notification.create`, `dok.message`, `server.joined|removed|updated`, `structure.changed`, `member.joined|left|updated`, `role.changed`, `channel.activity`, `read.update`, `voice.*`, `call.*`, `error`.
 
 Events are published only after the database transaction commits.
 
@@ -702,6 +704,8 @@ Custom CSS is useful and dangerous: pasted themes can exfiltrate data, spoof UI 
 | **Server** Member | Default role | Read, write, react, connect, speak, create invites |
 | **Platform** `school_moderator` | School staff (set with the CLI) | Review **escalated** reports, view message context, **reveal real identity** (audited) |
 | **Platform** `school_admin` | School staff | Everything above, plus all reports, platform audit log, suspend/restore accounts |
+| **Platform** `dok_representative` | Student government (set with the CLI) | Send DÖK messages to their own class only. No moderation access |
+| **Platform** `dok_president` | Student government (set with the CLI) | Send DÖK messages to any class or the whole school. No moderation access |
 
 Server permissions (18): view channel, send messages, read history, add reactions, connect, speak, mute members, deafen members, create invites, kick, ban, manage messages, manage channels, manage roles, manage members, manage server, view audit log, administrator. Role hierarchy applies: you can only act on people and roles below your highest role, and never grant a permission you do not hold. Every check runs on the server.
 
@@ -725,6 +729,26 @@ Server log: kicks, bans/unbans, timeouts, role and permission changes, channel/c
 
 `school_admin` can suspend an account (sessions revoked, WebSockets closed, login refused) and restore it, always with a recorded reason.
 
+### DÖK messaging
+
+The two DÖK roles let student-government members send announcements. These are neither channel messages nor DMs: they live in a separate inbox in the home sidebar (the **DÖK** entry next to Friends, with its own thread list like Direct messages).
+
+| Role | May send to |
+| --- | --- |
+| `dok_representative` | Only the class the account belongs to. The class is locked while the role is held (`PUT /me/class` answers `dok_class_locked`), and the CLI refuses to grant the role to an account without a class |
+| `dok_president` | Any active class or the whole school (every active user who has set a class) |
+
+- **Pseudo-anonymous.** Recipients see only the fixed label of the role the sender held at the time. The API never returns the author id or profile to them, the `staff` flag on user cards is reserved for moderators and admins (a DÖK role cannot be spotted on a profile), and notification payloads carry the role only. The real `author_id` is always stored. It is returned only to the author, `school_moderator` and `school_admin`, and it appears in the platform audit log as `dok.message_send` (thread, scope, class id, role, recipient count; never the text).
+- **Threads.** One thread per class plus one school-wide thread, created on first use. Recipients read the thread of their own class and the school thread. Presidents, moderators and admins can read every thread. A thread the viewer may not read is a plain 404.
+- **Encrypted at rest.** Bodies are sealed with AES-256-GCM under the `enc/dok-message` key (AAD `dok|<message id>|<thread id>`), the same scheme as report snapshots. Notification rows hold ids only; the preview is decrypted when the list is read, and only if the viewer can still read the thread.
+- **Notifications.** Each message creates one `dok_message` notification per recipient (not for the author), subject to the `dok` notification preference. Nothing pops up and nothing is pinned: the notification waits in the notification panel and its **dismiss** button unlocks after three seconds of visible time. That rule is UX only, and the server simply marks the notification read through `POST /notifications/read`. Opening the thread also marks that thread's notifications read. A `dok.message` WebSocket event (ids only) refreshes open inboxes.
+- **Limits.** 10 messages per minute per sender and 30 per minute per target. The checks run after authorization, so refused requests never use up a target's budget. Content follows the normal message rules and mentions are not interpreted. Sending to the whole school asks for confirmation.
+- **Suspension.** Admins can suspend DÖK accounts like any other user; only moderators and admins are protected.
+
+Endpoints: `GET /dok/inbox`, `POST /dok/messages`, `GET /dok/threads/{id}/messages`, `POST /dok/threads/{id}/read`.
+
+Known limits: class membership is self-declared, so a class thread is only as trustworthy as that declaration. There is no edit, delete or report flow for DÖK messages yet (moderators can suspend the sender or revoke the role). A school-wide send creates one notification per recipient: about 2.5 seconds for 1,000 recipients on SQLite.
+
 ---
 
 ## 21. Encryption architecture
@@ -741,6 +765,7 @@ MASTER_KEY (env / secret file, id k1)         PEPPER (separate secret)
    ├─ "enc/dek-wrap"        wraps data keys      ├─ "mac/kreta-identity"   duplicate-registration hash
    ├─ "enc/identity"        real names           ├─ "mac/recovery-code"    recovery-code hashes
    ├─ "enc/totp"            TOTP secrets         ├─ "mac/search-index"     message search tokens
+   ├─ "enc/dok-message"     DÖK message bodies
    └─ "enc/report-snapshot" report evidence      └─ "mac/login-method"     decoy answers for unknown users
         │
         └─ per-conversation / per-channel data key (DEK, 32 random bytes), stored wrapped in `data_keys`
@@ -835,7 +860,7 @@ Remember:
 
 ### Backend (`cd backend && pytest`)
 
-About 250 tests, all against a throw-away SQLite database. Highlights:
+About 270 tests, all against a throw-away SQLite database. Highlights:
 
 | Area | What is covered |
 | --- | --- |
@@ -849,11 +874,12 @@ About 250 tests, all against a throw-away SQLite database. Highlights:
 | Uploads | Valid images, SVG/polyglot/EXIF, wrong extension, size/dimension/pixel limits, path traversal, headers |
 | i18n | Every error code used in the source exists in all three catalogs with matching placeholders; language negotiation |
 | Security | Headers, CSP, HSTS, rate limiting, trusted-proxy handling, log redaction, error masking, invite/ID randomness, Argon2id, no comments or docstrings in Python sources |
+| DÖK messaging | Representatives limited to their own class, presidents to any class or the school, no real author or `staff` flag for recipients, notification create/mark-read/mute, unauthorized sends, class lock, thread visibility, pagination, per-user and per-target rate limits, audit record with the real author, encrypted and row-bound bodies, suspension, WebSocket event contents, CLI |
 | Migrations | Migrated schema equals the models, seed data present, downgrade works |
 
 ### Frontend (`cd frontend && npm test`)
 
-56 tests: translation key/placeholder parity and coverage of every used key, API client (CSRF, retry, errors, uploads), realtime client (reconnect, resubscribe, expired session), E-Kréta confirmation ("Te vagy ...?" Igen/Nem and 2FA), login, composer mentions, inert message rendering, accessibility primitives, theme provider and custom CSS injection, call security code, and a no-comments check.
+89 tests: translation key/placeholder parity and coverage of every used key, API client (CSRF, retry, errors, uploads), realtime client (reconnect, resubscribe, expired session), E-Kréta confirmation ("Te vagy ...?" Igen/Nem and 2FA), login, composer mentions, inert message rendering, accessibility primitives, theme provider and custom CSS injection, call security code, the DÖK inbox (role labels instead of names, the three-second dismiss rule, composer targets and whole-school confirmation, role guards), and a no-comments check.
 
 ### Static checks
 

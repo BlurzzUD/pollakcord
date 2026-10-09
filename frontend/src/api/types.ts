@@ -34,7 +34,7 @@ export interface ChatAppearance {
 }
 
 export type NotificationPrefs = Record<
-  "friend_requests" | "direct_messages" | "mentions" | "server" | "calls" | "moderation" | "sounds",
+  "friend_requests" | "direct_messages" | "mentions" | "server" | "calls" | "moderation" | "dok" | "sounds",
   boolean
 >;
 
@@ -56,7 +56,7 @@ export interface Me extends UserCard {
   accent_color: string | null;
   created_at: string;
   status: string;
-  platform_role: "user" | "school_moderator" | "school_admin";
+  platform_role: "user" | "school_moderator" | "school_admin" | "dok_representative" | "dok_president";
   class_code: string | null;
   settings: Settings;
 }
@@ -234,7 +234,7 @@ export interface InviteEntry {
 
 export interface AppNotification {
   id: Id;
-  type: "friend_request" | "friend_accepted" | "dm" | "mention" | "server" | "call_incoming" | "call_missed" | "moderation";
+  type: "friend_request" | "friend_accepted" | "dm" | "mention" | "server" | "call_incoming" | "call_missed" | "moderation" | "dok_message";
   payload: Record<string, any>;
   read: boolean;
   created_at: string;
@@ -296,4 +296,41 @@ export interface SessionRow {
 export interface IceConfig {
   ice_servers: RTCIceServer[];
   max_participants: number;
+}
+
+export type DokRole = "dok_representative" | "dok_president";
+export type DokScope = "class" | "school";
+export type DokTarget = { type: "school" } | { type: "class"; class_id: Id; code: string };
+
+export interface DokThread {
+  id: Id;
+  scope: DokScope;
+  class: { id: Id; code: string } | null;
+  last_message: { preview: string; created_at: string } | null;
+  last_message_at: string;
+  unread: number;
+  can_send: boolean;
+}
+
+export interface DokInbox {
+  threads: DokThread[];
+  unread: number;
+  send: { allowed: boolean; targets: DokTarget[] };
+}
+
+export interface DokMessage {
+  id: Id;
+  thread_id: Id;
+  scope: DokScope;
+  author_role: DokRole;
+  author: UserCard | null;
+  mine: boolean;
+  content: string;
+  created_at: string;
+}
+
+export interface DokHistoryPage {
+  messages: DokMessage[];
+  has_more: boolean;
+  last_read_message_id: Id | null;
 }

@@ -21,6 +21,7 @@ from .security.passwords import PasswordService
 from .security.ratelimit import RateLimiter
 from .security.sessions import CookieNames
 from .seed import ensure_school_classes
+from .services.dok import DokService
 from .services.messages import MessageService
 from .services.uploads import media_path
 from .spa import mount_frontend
@@ -65,6 +66,7 @@ def create_app(settings: Settings | None = None, kreta_adapter: KretaAuthPort | 
         app.state.hub = hub
         app.state.voice = VoiceManager(settings.voice_max_participants)
         app.state.messages = MessageService(vault, settings)
+        app.state.dok = DokService(vault, settings)
         app.state.kreta_flows = flows
         from .realtime.ws import install_revalidator
 

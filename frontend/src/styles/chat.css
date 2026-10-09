@@ -687,3 +687,65 @@
     width: min(280px, 85vw);
   }
 }
+
+.dok-avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  color: var(--ink);
+}
+
+.dm-item .dok-avatar {
+  width: 36px;
+  height: 36px;
+}
+
+.dok-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.45rem 1rem;
+  font-size: 0.88rem;
+  background: var(--ink-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.dok-real-author {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.1rem 0 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.dok-target {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+  font-weight: 700;
+}
+
+.dok-sender-notice {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.dok-older {
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 0 0.5rem;
+}
+
+.card .dok-composer {
+  padding: 0;
+  background: none;
+  border-top: 0;
+}

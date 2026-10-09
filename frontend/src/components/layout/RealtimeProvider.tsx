@@ -90,9 +90,15 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   useRealtimeEvent("read.peer", () => undefined);
 
+  useRealtimeEvent("dok.message", () => {
+    invalidateSoon(["dok"]);
+  });
+
   useRealtimeEvent<AppNotification>("notification.create", (notification) => {
     invalidateSoon(["notifications"]);
-    const viewing = notification.type === "dm" && path.current.endsWith(`/dm/${notification.payload.conversation_id}`);
+    const viewing =
+      (notification.type === "dm" && path.current.endsWith(`/dm/${notification.payload.conversation_id}`)) ||
+      (notification.type === "dok_message" && path.current.endsWith(`/dok/${notification.payload.thread_id}`));
     if (viewing) {
       return;
     }

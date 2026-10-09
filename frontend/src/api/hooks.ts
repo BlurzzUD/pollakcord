@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { api } from "./client";
 import type {
   AppNotification,
   Conversation,
+  DokHistoryPage,
+  DokInbox,
   FriendRequestEntry,
   Member,
   Meta,
@@ -55,5 +57,20 @@ export function useNotifications() {
   return useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.get<{ items: AppNotification[]; unread: number }>("/notifications"),
+  });
+}
+
+export function useDokInbox() {
+  return useQuery({ queryKey: ["dok", "inbox"], queryFn: () => api.get<DokInbox>("/dok/inbox") });
+}
+
+export function useDokMessages(threadId: string | undefined) {
+  return useInfiniteQuery({
+    queryKey: ["dok", "messages", threadId],
+    enabled: Boolean(threadId),
+    retry: false,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.get<DokHistoryPage>(`/dok/threads/${threadId}/messages`, { limit: 50, before: pageParam }),
+    getNextPageParam: (last) => (last.has_more ? last.messages[0]?.id : undefined),
   });
 }

@@ -27,6 +27,7 @@ DEFAULT_NOTIFICATION_PREFS: dict[str, Any] = {
     "server": True,
     "calls": True,
     "moderation": True,
+    "dok": True,
     "sounds": True,
 }
 

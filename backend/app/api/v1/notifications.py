@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,10 +16,11 @@ class ReadBody(BaseModel):
 
 
 @router.get("")
-async def list_notifications(limit: int = Query(default=40, ge=1, le=100), auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db)) -> dict:
+async def list_notifications(request: Request, limit: int = Query(default=40, ge=1, le=100), auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db)) -> dict:
     rows = (await db.execute(select(Notification).where(Notification.user_id == auth.user.id).order_by(Notification.created_at.desc()).limit(limit))).scalars().all()
     unread = (await db.execute(select(func.count()).select_from(Notification).where(Notification.user_id == auth.user.id, Notification.read_at.is_(None)))).scalar_one()
-    return {"items": [service.notification_dict(r) for r in rows], "unread": unread}
+    items = await request.app.state.dok.attach_previews(db, auth.user, [service.notification_dict(r) for r in rows])
+    return {"items": items, "unread": unread}
 
 
 @router.post("/read")

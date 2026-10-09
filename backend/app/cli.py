@@ -21,6 +21,9 @@ async def grant_role(username: str, role: str) -> int:
         if user is None:
             print("user not found", file=sys.stderr)
             return 1
+        if role == PlatformRole.DOK_REPRESENTATIVE.value and user.school_class_id is None:
+            print("user has no class", file=sys.stderr)
+            return 1
         user.platform_role = role
         await db.commit()
     await engine.dispose()

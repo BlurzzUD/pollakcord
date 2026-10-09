@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Any
 
 from ..models import Channel, Category, Profile, Role, Server, User, UserSettings
+from ..models.enums import STAFF_ROLES
+from ..models.user import DEFAULT_NOTIFICATION_PREFS
 from .permissions import bits_to_names
 
 
@@ -23,7 +25,7 @@ def user_card(user: User, profile: Profile | None) -> dict[str, Any]:
         "username": user.username,
         "display_name": user.display_name,
         "avatar_url": media_url("avatar", profile.avatar_key if profile else None),
-        "staff": user.platform_role != "user",
+        "staff": user.platform_role in STAFF_ROLES,
     }
 
 
@@ -62,7 +64,7 @@ def settings_dict(row: UserSettings) -> dict[str, Any]:
         "custom_css": row.custom_css,
         "developer_mode": row.developer_mode,
         "chat_appearance": row.chat_appearance,
-        "notification_prefs": row.notification_prefs,
+        "notification_prefs": {**DEFAULT_NOTIFICATION_PREFS, **row.notification_prefs},
         "privacy": {
             "friend_requests": row.friend_requests,
             "direct_messages": row.direct_messages,

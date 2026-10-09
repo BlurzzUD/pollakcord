@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
-import { useDms, useFriendRequests } from "../../api/hooks";
+import { useDms, useDokInbox, useFriendRequests } from "../../api/hooks";
 import { useLive } from "../../store/live";
+import { threadLabel } from "../../utils/dok";
 import { Avatar } from "../Avatar";
 import { Icon } from "../Icon";
 import { SearchDialog } from "./SearchDialog";
@@ -12,9 +13,12 @@ export function HomeSidebar() {
   const { t } = useTranslation();
   const dms = useDms();
   const requests = useFriendRequests();
+  const dok = useDokInbox();
   const presence = useLive((state) => state.presence);
   const [searching, setSearching] = useState(false);
   const pending = requests.data?.incoming.length ?? 0;
+  const dokThreads = dok.data?.threads ?? [];
+  const dokUnread = dok.data?.unread ?? 0;
   return (
     <div className="sidebar__scroll">
       <button type="button" className="search-button" onClick={() => setSearching(true)}>
@@ -29,7 +33,32 @@ export function HomeSidebar() {
           <Icon name="users" /> {t("nav.friends")}
           {pending > 0 ? <span className="badge-count">{pending}</span> : null}
         </NavLink>
+        <NavLink to="/app/dok" end className={({ isActive }) => `nav-item${isActive ? " is-active" : ""}`}>
+          <Icon name="megaphone" /> {t("nav.dok")}
+          {dokUnread > 0 ? <span className="badge-count">{dokUnread}</span> : null}
+        </NavLink>
       </nav>
+      {dokThreads.length > 0 ? (
+        <>
+          <h2 className="sidebar__heading">{t("dok.threads")}</h2>
+          <ul className="dm-list">
+            {dokThreads.map((thread) => (
+              <li key={thread.id}>
+                <NavLink to={`/app/dok/${thread.id}`} className={({ isActive }) => `dm-item${isActive ? " is-active" : ""}`}>
+                  <span className="dok-avatar" aria-hidden="true">
+                    <Icon name="megaphone" size={18} />
+                  </span>
+                  <span className="dm-item__text">
+                    <strong>{threadLabel(t, thread)}</strong>
+                    <span className="muted">{thread.last_message?.preview ?? ""}</span>
+                  </span>
+                  {thread.unread > 0 ? <span className="badge-count">{thread.unread}</span> : null}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <h2 className="sidebar__heading">{t("nav.direct_messages")}</h2>
       <ul className="dm-list">
         {(dms.data ?? []).map((conversation) => (

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db.types import utcnow
 from ...errors import AppError
 from ...models import AuditLog, Message, Report, SchoolClass, User, UserIdentity
-from ...models.enums import AccountStatus, AuditAction, PlatformRole, ReportStatus, ScopeKind
+from ...models.enums import STAFF_ROLES, AccountStatus, AuditAction, PlatformRole, ReportStatus, ScopeKind
 from ...security.ratelimit import enforce
 from ...security.sessions import revoke_user_sessions
 from ...services import audit, people
@@ -136,7 +136,7 @@ async def reveal_identity(user_id: int, body: ReasonBody, request: Request, auth
 async def set_user_status(user_id: int, body: StatusBody, request: Request, auth: Auth = Depends(require_moderator), db: AsyncSession = Depends(get_db)) -> dict[str, str]:
     require_admin(auth)
     user = await db.get(User, user_id)
-    if user is None or user.id == auth.user.id or user.platform_role != PlatformRole.USER.value:
+    if user is None or user.id == auth.user.id or user.platform_role in STAFF_ROLES:
         raise AppError("not_found", 404)
     if user.status == AccountStatus.PENDING_SECURITY.value:
         raise AppError("conflict", 409)

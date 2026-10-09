@@ -106,13 +106,13 @@ describe("translations", () => {
       "appearance.token_": ["bg", "bg_alt", "bg_deep", "text", "text_muted", "accent", "accent_text", "danger", "mention", "border"],
       "voice.": ["microphone_denied", "microphone_unavailable"],
       "server.perm_group_": ["general", "text", "voice", "moderation", "advanced"],
-      "notifications.pref_": ["friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "sounds"],
+      "notifications.pref_": ["friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "dok", "sounds"],
       "privacy.": ["friend_requests", "direct_messages", "class_visibility", "online_status", "profile_visibility", "activity_visibility", "voice_calls"],
       "audit.actions.": [
         "member_kick", "member_ban", "member_unban", "member_timeout", "member_update", "member_roles", "role_create", "role_update", "role_delete",
         "channel_create", "channel_update", "channel_delete", "channel_permissions", "category_create", "category_update", "category_delete",
         "server_update", "message_delete", "message_pin", "message_unpin", "invite_create", "invite_revoke", "voice_moderate", "report_resolve",
-        "platform_identity_reveal", "platform_message_view", "platform_user_status", "platform_report_view", "account_recovery",
+        "platform_identity_reveal", "platform_message_view", "platform_user_status", "platform_report_view", "account_recovery", "dok_message_send",
       ],
       "permissions.": [
         "view_channel", "send_messages", "read_message_history", "add_reactions", "connect", "speak", "mute_members", "deafen_members", "create_invite",

@@ -481,6 +481,11 @@ label.list__item:hover {
   gap: 0.1rem;
 }
 
+.list__row--grow > .list__item {
+  flex: 1;
+  min-width: 0;
+}
+
 .list__row {
   display: flex;
   align-items: center;
