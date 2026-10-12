@@ -4,6 +4,7 @@ import { Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { RequireAuth } from "./components/RequireAuth";
 import { useAuth } from "./store/auth";
+import { ClassSpacePage } from "./pages/ClassSpacePage";
 import { DmPage } from "./pages/DmPage";
 import { DokPage } from "./pages/DokPage";
 import { DokThreadPage } from "./pages/DokThreadPage";
@@ -45,6 +46,7 @@ export function App() {
         <Route path="dm/:conversationId" element={<DmPage />} />
         <Route path="dok" element={<DokPage />} />
         <Route path="dok/:threadId" element={<DokThreadPage />} />
+        <Route path="class-space" element={<ClassSpacePage />} />
         <Route path="server/:serverId/:channelId?" element={<ServerPage />} />
         <Route path="moderation" element={<ModerationPage />} />
       </Route>

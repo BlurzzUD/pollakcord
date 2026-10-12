@@ -1,8 +1,12 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
+import { useAuth } from "../store/auth";
 import { api } from "./client";
 import type {
   AppNotification,
+  ClassSpaceHistoryPage,
+  ClassSpaceMembers,
+  ClassSpaceState,
   Conversation,
   DokHistoryPage,
   DokInbox,
@@ -71,6 +75,37 @@ export function useDokMessages(threadId: string | undefined) {
     retry: false,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api.get<DokHistoryPage>(`/dok/threads/${threadId}/messages`, { limit: 50, before: pageParam }),
+    getNextPageParam: (last) => (last.has_more ? last.messages[0]?.id : undefined),
+  });
+}
+
+export const classSpaceStateKey = (classCode: string | null | undefined) => ["class-space", "state", classCode ?? null];
+
+export function useClassSpace() {
+  const classCode = useAuth((state) => state.me?.class_code);
+  return useQuery({
+    queryKey: classSpaceStateKey(classCode),
+    queryFn: () => api.get<ClassSpaceState>("/class-spaces/me"),
+    enabled: Boolean(classCode),
+  });
+}
+
+export function useClassSpaceMembers(classId: string | undefined) {
+  return useQuery({
+    queryKey: ["class-space", "members", classId],
+    queryFn: () => api.get<ClassSpaceMembers>(`/class-spaces/${classId}/members`),
+    enabled: Boolean(classId),
+    retry: false,
+  });
+}
+
+export function useClassSpaceMessages(classId: string | undefined) {
+  return useInfiniteQuery({
+    queryKey: ["class-space", "messages", classId],
+    enabled: Boolean(classId),
+    retry: false,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.get<ClassSpaceHistoryPage>(`/class-spaces/${classId}/messages`, { limit: 50, before: pageParam }),
     getNextPageParam: (last) => (last.has_more ? last.messages[0]?.id : undefined),
   });
 }

@@ -1,5 +1,6 @@
 from .audit import AuditLog, Notification
 from .auth import AuthMethod, AuthSession, RecoveryCode, TotpConfig
+from .class_space import ClassSpaceMember, ClassSpaceMessage
 from .dok import DokMessage, DokThread
 from .message import (
     Conversation,
@@ -34,6 +35,8 @@ __all__ = [
     "Block",
     "Category",
     "Channel",
+    "ClassSpaceMember",
+    "ClassSpaceMessage",
     "Conversation",
     "DataKey",
     "DokMessage",

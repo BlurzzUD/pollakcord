@@ -4,6 +4,7 @@ import { Navigate, Outlet, useLocation, useMatch } from "react-router-dom";
 
 import { useAuth } from "../../store/auth";
 import { useUi } from "../../store/ui";
+import { ClassSpacePrompt } from "../classspace/ClassSpacePrompt";
 import { Spinner } from "../EmptyState";
 import { Toasts } from "../Toasts";
 import { CallOverlay } from "./CallOverlay";
@@ -46,6 +47,7 @@ function ShellLayout() {
         {drawerOpen ? <div className="shell__backdrop" onClick={() => setDrawer(false)} aria-hidden="true" /> : null}
       </div>
       <ProfileModal />
+      <ClassSpacePrompt />
       <CallOverlay />
       <Toasts />
     </div>

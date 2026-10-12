@@ -49,6 +49,7 @@ A Discord-style communication platform built for one school. Students prove they
 | Friends | Requests, accept/decline/cancel, remove, block, presence per privacy, class-based suggestions (only between users who both opted in) |
 | Direct messages | Text, replies, reactions, delete own, timestamps, read/unread, report, block, voice calls |
 | DÖK messages | Student-government announcements in their own inbox next to Friends and Direct messages. Recipients see only the role (*DÖK képviselő* / *DÖK elnök*), never the sender; the server always stores the real author. Each message creates a notification that can be dismissed after three seconds |
+| Class spaces | A private chat for each school class (for example 9A), separate from servers and from the DÖK. Members are the users whose declared class matches. Each member answers once whether their username is shown to classmates; otherwise classmates see only a *Classmate* label with a short id. Already registered users are asked on their next visit, and nobody is added before answering |
 | Servers | Create/join/leave, invites (`/invite/<code>`), categories, text and voice channels, roles (Owner, Administrator, Moderator, Member + custom), 18 permissions, per-category and per-channel overwrites, pins, slowmode, timeouts, kick/ban, audit log, server reports |
 | Voice | WebRTC peer-to-peer mesh, end-to-end encrypted (DTLS-SRTP), speaking indicators, mute/deafen, server-side mute/deafen requests, DM calls with ringing, call security code |
 | Search | Friends, users, servers, channels and messages (permission-filtered, accent-insensitive whole-word message search over encrypted data) |
@@ -131,19 +132,19 @@ pollakcord/
 ├── backend/
 │   ├── alembic.ini  pytest.ini  requirements.txt  requirements-dev.txt
 │   ├── docker/entrypoint.sh
-│   ├── migrations/                 env.py, script.py.mako, versions/0001_initial_schema.py, 0002_dok_messaging.py
+│   ├── migrations/                 env.py, script.py.mako, versions/0001_initial_schema.py, 0002_dok_messaging.py, 0003_class_spaces.py
 │   ├── app/
 │   │   ├── main.py  config.py  cli.py  seed.py  spa.py  ids.py  i18n.py  errors.py  logging_config.py
 │   │   ├── locales/                hu.json  en.json  de.json     (API error messages, server defaults)
-│   │   ├── api/                    deps.py, v1/{auth,me,users,friends,dms,servers,channels,invites,
+│   │   ├── api/                    deps.py, v1/{auth,me,users,friends,dms,class_spaces,servers,channels,invites,
 │   │   │                           search,notifications,uploads,rtc,moderation,meta,messaging,router}.py
 │   │   ├── crypto/                 keyring.py  envelope.py  blind_index.py
 │   │   ├── db/                     base.py  session.py  types.py
 │   │   ├── integrations/kreta/     adapter.py  flows.py  script.sha256  script/kreta_login_from_dumps.py
-│   │   ├── models/                 users, auth, social, servers, messages, audit/notifications, enums
+│   │   ├── models/                 users, auth, social, servers, messages, class_space, audit/notifications, enums
 │   │   ├── realtime/               hub.py  voice.py  ws.py  outbox.py
 │   │   ├── security/               passwords  totp  recovery  sessions  middleware  ratelimit  deps_ip  audit_helpers
-│   │   └── services/               permissions  privacy  messages  servers  accounts  people
+│   │   └── services/               permissions  privacy  messages  servers  accounts  people  class_spaces
 │   │                               notifications  uploads  css_sanitizer  audit  serializers
 │   └── tests/                      ~250 tests, incl. tests/kreta_fake/ (HTTP stand-in for E-Kréta)
 └── frontend/
@@ -151,11 +152,11 @@ pollakcord/
     ├── scripts/check-no-comments.mjs
     └── src/
         ├── api/        client (CSRF, errors, language header), types, hooks
-        ├── components/ Avatar, Modal, Field, Toasts, chat/*, layout/*
+        ├── components/ Avatar, Modal, Field, Toasts, chat/*, classspace/*, layout/*
         ├── i18n/       index.ts, locales/{hu,en,de}.json
-        ├── pages/      auth/*, settings/*, server/*, Home, Friends, Dm, Invite, Moderation
+        ├── pages/      auth/*, settings/*, server/*, Home, Friends, Dm, ClassSpace, Invite, Moderation
         ├── realtime/   socket.ts (reconnect, resubscribe), useRealtimeEvent.ts
-        ├── store/      auth, ui, live (zustand)
+        ├── store/      auth, ui, live, classSpace (zustand)
         ├── styles/     tokens, base, layout, components, chat, pages (.css)
         ├── theme/      ThemeProvider, tokens
         ├── voice/      VoiceManager (WebRTC mesh), useVoice, securityCode
@@ -327,7 +328,7 @@ CREATE DATABASE pollakcord OWNER pollakcord ENCODING 'UTF8';
 
 Set `POLLAKCORD_DATABASE_URL=postgresql+asyncpg://pollakcord:change-me@db-host:5432/pollakcord`, then run the migrations ([section 8](#8-database-migrations)). Docker Compose does all of this for you.
 
-### Schema overview (35 tables)
+### Schema overview (37 tables)
 
 | Group | Tables |
 | --- | --- |
@@ -335,7 +336,7 @@ Set `POLLAKCORD_DATABASE_URL=postgresql+asyncpg://pollakcord:change-me@db-host:5
 | Authentication | `auth_methods` (password hash, lockout counters), `totp_configs` (encrypted secret), `recovery_codes` (hashed), `sessions` (hashed tokens) |
 | Social | `friendships`, `friend_requests`, `blocks` |
 | Servers | `servers`, `roles`, `server_members`, `member_roles`, `categories`, `channels`, `permission_overwrites`, `invites`, `bans` |
-| Messaging | `conversations`, `data_keys`, `messages` (metadata), `message_contents` (ciphertext), `message_reactions`, `read_states`, `message_mentions`, `message_search_tokens`, `dok_threads`, `dok_messages` (ciphertext) |
+| Messaging | `conversations`, `data_keys`, `messages` (metadata), `message_contents` (ciphertext), `message_reactions`, `read_states`, `message_mentions`, `message_search_tokens`, `dok_threads`, `dok_messages` (ciphertext), `class_space_members`, `class_space_messages` (ciphertext) |
 | Moderation | `reports` (encrypted snapshots), `audit_logs`, `notifications` |
 
 IDs are time-ordered 63-bit snowflakes, returned to clients as strings. Invite codes are 10 random base-62 characters (about 60 bits).
@@ -354,6 +355,7 @@ alembic current
 
 - `migrations/versions/0001_initial_schema.py` creates every table and **seeds the 12 classes**: 9A, 9B, 10A, 10B, 11A, 11B, 12A, 12B, 13A, 13B, 14A, 14B.
 - `migrations/versions/0002_dok_messaging.py` adds `dok_threads` and `dok_messages`. It is additive: no existing table is changed.
+- `migrations/versions/0003_class_spaces.py` adds `class_space_members` and `class_space_messages`. It is additive: no existing table is changed and nothing is seeded, because a class space exists implicitly for every active row of `school_classes` (a class added later has its space at once, an empty database needs no extra step). Its downgrade drops only those two tables.
 - A test asserts that the migrated schema is exactly what the models describe.
 
 ### Changing the classes later
@@ -596,7 +598,7 @@ Do not enable HTTP compression for API responses that mix secrets with attacker-
 
 Client operations: `ping`, `subscribe`, `unsubscribe`, `typing`, `voice.join`, `voice.leave`, `voice.signal`, `voice.state`, `voice.moderate`, `call.invite`, `call.accept`, `call.decline`, `call.cancel`.
 
-Server events (envelope `{ "t": <event>, "d": <data> }`): `ready`, `message.create`, `message.delete`, `reaction.update`, `message.pin`, `typing`, `presence.update`, `friend.request|added|removed`, `notification.create`, `dok.message`, `server.joined|removed|updated`, `structure.changed`, `member.joined|left|updated`, `role.changed`, `channel.activity`, `read.update`, `voice.*`, `call.*`, `error`.
+Server events (envelope `{ "t": <event>, "d": <data> }`): `ready`, `message.create`, `message.delete`, `reaction.update`, `message.pin`, `typing`, `presence.update`, `friend.request|added|removed`, `notification.create`, `dok.message`, `class_space.message`, `server.joined|removed|updated`, `structure.changed`, `member.joined|left|updated`, `role.changed`, `channel.activity`, `read.update`, `voice.*`, `call.*`, `error`.
 
 Events are published only after the database transaction commits.
 
@@ -749,6 +751,23 @@ Endpoints: `GET /dok/inbox`, `POST /dok/messages`, `GET /dok/threads/{id}/messag
 
 Known limits: class membership is self-declared, so a class thread is only as trustworthy as that declaration. There is no edit, delete or report flow for DÖK messages yet (moderators can suspend the sender or revoke the role). A school-wide send creates one notification per recipient: about 2.5 seconds for 1,000 recipients on SQLite.
 
+### Class spaces
+
+Every active class in `school_classes` has a private **class space**: one shared conversation for the users whose declared class matches. It is neither a server (no roles, channels or invites) nor part of the DÖK. It appears in the home sidebar as **Osztálytér** next to the DÖK entry, with its own unread badge, and has a member list, text messages, delete-own and report.
+
+- **Design.** A dedicated surface in the spirit of the DÖK inbox, not a system-managed server. A space is identified by its class id, so there is nothing to create or seed. Reusing servers would have made every classmate a "shared server" contact (widening the DM, profile and presence rules), put usernames into every existing member and message payload, and needed a synthetic server owner.
+- **Membership is derived and enforced on the server.** `class_space_members` holds at most one row per user: user id, class id, `show_username`, `answered_at`. A request is authorized only if the class is active, the user's current `school_class_id` equals that class, and the user's row points at the same class, so a stale row never grants access. Every other caller gets the same 404: wrong class, no class, question not answered yet, moderators, admins and DÖK roles (no bypass). Suspended users disappear from member lists and receive no events.
+- **Username choice.** `show_username = true`: classmates see the display name and username (member list and messages), without widening profile rules: a classmate still cannot open the profile, DM or search for that person unless the existing privacy settings allow it. `false`: classmates see only the fixed label *Osztálytárs* / *Classmate* / *Mitschüler*; the real `author_id` is still stored. Messages sent while hidden also carry a stable six-character alias (an HMAC of class id and user id) so a conversation stays readable. The alias is never sent next to a name, and the member list counts hidden members without listing them, so an alias cannot be linked to a username.
+- **The choice is applied per message.** It is recorded when a message is sent. Turning the username on never reveals earlier anonymous messages; turning it off removes the name from earlier messages as well.
+- **One-time prompt.** Until a user answers they are not a member (the safe default). `GET /class-spaces/me` returns `prompt_required: true` for anyone who has a class but no answer for it, so already registered users get a dismissible dialog on their next app load, and new registrations on their first visit to the home screen. Yes or No stores the answer, joins the space and the prompt never comes back; *Later* or closing it only hides it until the next visit. The answer can be changed under Settings, Account.
+- **Changing class.** `PUT /me/class` removes the membership of the old class in the same transaction, and clearing the class does the same. Old messages stay in the old space and are shown there without a name. The new class needs a fresh answer, and returning to a former class asks again.
+- **Moderation.** A member can report a message with `POST /class-spaces/{class}/messages/{id}/report`. It creates an ordinary escalated row in `reports` with an encrypted snapshot (the message plus context), so school moderators work from the existing queue, see the real authors, and every view and identity reveal is audited as before. No new reveal path exists. Authors can delete their own messages.
+- **Encrypted at rest.** Bodies are sealed with AES-256-GCM under `enc/class-space-message` (AAD `cspace|<message id>|<class id>`), and swapped rows fail authentication. Class space messages are not indexed for search and have no reactions, mentions, uploads or notifications. A `class_space.message` WebSocket event (ids only) refreshes open spaces.
+
+API (`/api/v1/class-spaces`): `GET /me`, `PUT /me/visibility`, `GET /{class}/members`, `GET|POST /{class}/messages`, `POST /{class}/read`, `DELETE /{class}/messages/{id}`, `POST /{class}/messages/{id}/report`.
+
+Known limits: the class is self-declared, so a space is only as trustworthy as that declaration; nothing proves that someone belongs to the class beyond their E-Kréta account binding. Anonymity is towards classmates only, because moderators can resolve an author through a report. Messages cannot be edited, and a moderator cannot remove a message directly (they can suspend the sender).
+
 ---
 
 ## 21. Encryption architecture
@@ -765,8 +784,9 @@ MASTER_KEY (env / secret file, id k1)         PEPPER (separate secret)
    ├─ "enc/dek-wrap"        wraps data keys      ├─ "mac/kreta-identity"   duplicate-registration hash
    ├─ "enc/identity"        real names           ├─ "mac/recovery-code"    recovery-code hashes
    ├─ "enc/totp"            TOTP secrets         ├─ "mac/search-index"     message search tokens
-   ├─ "enc/dok-message"     DÖK message bodies
-   └─ "enc/report-snapshot" report evidence      └─ "mac/login-method"     decoy answers for unknown users
+   ├─ "enc/dok-message"     DÖK message bodies   ├─ "mac/login-method"     decoy answers for unknown users
+   ├─ "enc/class-space-message"  class bodies    └─ "mac/class-space-alias" anonymous class labels
+   └─ "enc/report-snapshot" report evidence
         │
         └─ per-conversation / per-channel data key (DEK, 32 random bytes), stored wrapped in `data_keys`
               │  AES-256-GCM, random 96-bit nonce, AAD = "msg|<message id>|<scope>|<scope id>|<author id>"
@@ -845,7 +865,7 @@ Remember:
 - **Text messages are not end-to-end encrypted** (by design, for moderation). See [section 21](#21-encryption-architecture).
 - **E-Kréta login depends on the supplied scripted web flow.** E-Kréta changes can break it; the adapter fails closed and tests detect marker drift. The script's own plaintext logging is neutralized by isolation, not by editing it.
 - **Typing school credentials into a third-party site is inherently risky** (phishing precedent, possible terms-of-service issues). See the note in [section 9](#authorization-and-data-protection-note).
-- **Class is self-declared**, not verified. The script only returns a name.
+- **Class is self-declared**, not verified. The script only returns a name. Class spaces inherit this: anyone can choose a class and then joins that class's space.
 - **One process only** (in-memory hub, flow store, limiter). No Redis adapter yet.
 - **Mesh voice** is limited to 8 people and server mute is cooperative.
 - **Message search is whole-word only.**
@@ -875,11 +895,12 @@ About 270 tests, all against a throw-away SQLite database. Highlights:
 | i18n | Every error code used in the source exists in all three catalogs with matching placeholders; language negotiation |
 | Security | Headers, CSP, HSTS, rate limiting, trusted-proxy handling, log redaction, error masking, invite/ID randomness, Argon2id, no comments or docstrings in Python sources |
 | DÖK messaging | Representatives limited to their own class, presidents to any class or the school, no real author or `staff` flag for recipients, notification create/mark-read/mute, unauthorized sends, class lock, thread visibility, pagination, per-user and per-target rate limits, audit record with the real author, encrypted and row-bound bodies, suspension, WebSocket event contents, CLI |
+| Class spaces | No class means no space, the one-time prompt flag, Yes and No (member list, message authors and anonymous labels, no username, id or display name in peer payloads), stable per-member aliases, per-message visibility, class change and clearing, stale rows, retired classes, plain 404 for non-members, other classes, staff and DÖK roles, malformed ids, reports and moderator access, pagination, unread counts, delete-own, validation, encrypted and row-bound bodies, rate limits, suspension, WebSocket event contents, no widening of profile, DM, search or suggestion rules |
 | Migrations | Migrated schema equals the models, seed data present, downgrade works |
 
 ### Frontend (`cd frontend && npm test`)
 
-89 tests: translation key/placeholder parity and coverage of every used key, API client (CSRF, retry, errors, uploads), realtime client (reconnect, resubscribe, expired session), E-Kréta confirmation ("Te vagy ...?" Igen/Nem and 2FA), login, composer mentions, inert message rendering, accessibility primitives, theme provider and custom CSS injection, call security code, the DÖK inbox (role labels instead of names, the three-second dismiss rule, composer targets and whole-school confirmation, role guards), and a no-comments check.
+89 tests: translation key/placeholder parity and coverage of every used key, API client (CSRF, retry, errors, uploads), realtime client (reconnect, resubscribe, expired session), E-Kréta confirmation ("Te vagy ...?" Igen/Nem and 2FA), login, composer mentions, inert message rendering, accessibility primitives, theme provider and custom CSS injection, call security code, the DÖK inbox (role labels instead of names, the three-second dismiss rule, composer targets and whole-school confirmation, role guards), class spaces (the one-time prompt appears only when required and only once answered, Yes and No call the right endpoint, labels and member list respect the username choice, composer, delete and report, settings control, sidebar entry, translations), and a no-comments check.
 
 ### Static checks
 
@@ -887,7 +908,7 @@ About 270 tests, all against a throw-away SQLite database. Highlights:
 
 ### Status at packaging time
 
-The complete backend suite passed at its last full run (248 tests; one further test was added afterwards and passed on its own), the frontend suite passed (56 tests), and the production frontend build succeeded. No automated tests exercise PostgreSQL, a real TURN server, real browsers' WebRTC stacks or the live E-Kréta service; test those in staging.
+The complete backend suite passed at its last full run (248 tests; one further test was added afterwards and passed on its own), the frontend suite passed (56 tests), and the production frontend build succeeded. The class-space suites (`backend/tests/test_class_spaces.py`, `frontend/src/test/classSpace.test.tsx`) were added afterwards in an environment without package installation, so they have not been run yet; run both suites, `npm run typecheck` and `npm run build` before merging. No automated tests exercise PostgreSQL, a real TURN server, real browsers' WebRTC stacks or the live E-Kréta service; test those in staging.
 
 ---
 

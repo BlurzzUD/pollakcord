@@ -1,10 +1,11 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import type { Me, SchoolClass } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
+import { ClassSpaceSetting } from "../../components/classspace/ClassSpaceSetting";
 import { CopyId } from "../../components/CopyId";
 import { ErrorText } from "../../components/ErrorText";
 import { SelectField, TextAreaField, TextField } from "../../components/Field";
@@ -52,6 +53,7 @@ export function AccountSection() {
   const [useAccent, setUseAccent] = useState(Boolean(me.accent_color));
   const [classId, setClassId] = useState("");
   const [visibility, setVisibility] = useState(me.settings.privacy.class_visibility);
+  const queryClient = useQueryClient();
   const classes = useQuery({ queryKey: ["classes"], queryFn: () => api.get<SchoolClass[]>("/me/classes") });
   const currentClass = classes.data?.find((item) => item.code === me.class_code);
 
@@ -66,6 +68,7 @@ export function AccountSection() {
     mutationFn: () => api.put<Me>("/me/class", { class_id: classId || currentClass?.id, visibility }),
     onSuccess: (updated) => {
       setMe(updated);
+      void queryClient.invalidateQueries({ queryKey: ["class-space"] });
       push("success", t("common.saved"));
     },
   });
@@ -123,6 +126,7 @@ export function AccountSection() {
           {t("common.save")}
         </button>
       </form>
+      <ClassSpaceSetting />
     </div>
   );
 }

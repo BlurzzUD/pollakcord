@@ -334,3 +334,47 @@ export interface DokHistoryPage {
   has_more: boolean;
   last_read_message_id: Id | null;
 }
+
+export interface ClassSpaceClass {
+  id: Id;
+  code: string;
+}
+
+export interface ClassSpaceState {
+  class: ClassSpaceClass | null;
+  member: boolean;
+  prompt_required: boolean;
+  show_username: boolean | null;
+  alias: string | null;
+  members: number | null;
+  unread: number;
+}
+
+export interface ClassSpaceMember {
+  user: UserCard;
+  mine: boolean;
+  show_username: boolean;
+}
+
+export interface ClassSpaceMembers {
+  class: ClassSpaceClass;
+  members: ClassSpaceMember[];
+  hidden_count: number;
+  total: number;
+}
+
+export interface ClassSpaceMessage {
+  id: Id;
+  class_id: Id;
+  author: UserCard | null;
+  alias: string | null;
+  mine: boolean;
+  content: string;
+  created_at: string;
+}
+
+export interface ClassSpaceHistoryPage {
+  messages: ClassSpaceMessage[];
+  has_more: boolean;
+  last_read_message_id: Id | null;
+}

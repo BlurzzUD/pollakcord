@@ -39,6 +39,7 @@ const PATHS: Record<string, string> = {
   arrowLeft: "M19 12H5m6-6-6 6 6 6",
   megaphone: "M3 10v4h3l8 4V6L6 10H3ZM7 14l1.500 5h2.500l-1-4.500M17.500 9a4 4 0 0 1 0 6",
   warning: "M12 4 2.500 20h19L12 4Zm0 6v5M12 17.500h.01",
+  school: "M2.500 9.500 12 5l9.500 4.500L12 14 2.500 9.500ZM6.500 11.800V16c0 1.200 2.500 2.500 5.500 2.500s5.500-1.300 5.500-2.500v-4.200M21.500 9.500V15",
 };
 
 export type IconName = keyof typeof PATHS;

@@ -169,7 +169,7 @@ async def list_classes(db: AsyncSession = Depends(get_db)) -> list[dict]:
 
 
 @router.put("/class")
-async def set_class(body: ClassBody, auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db)) -> dict:
+async def set_class(body: ClassBody, request: Request, auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db)) -> dict:
     row = await get_settings_row(db, auth.user.id)
     if body.visibility != ClassVisibility.HIDDEN.value or body.class_id is not None:
         if body.class_id is None or not body.class_id.isdigit():
@@ -184,6 +184,7 @@ async def set_class(body: ClassBody, auth: Auth = Depends(require_auth), db: Asy
         auth.user.school_class_id = None
     row.class_visibility = body.visibility
     row.class_prompt_answered = True
+    await request.app.state.class_spaces.leave_stale(db, auth.user)
     await db.commit()
     return await load_self_payload(db, auth.user)
 

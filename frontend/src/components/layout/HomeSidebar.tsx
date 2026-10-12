@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
-import { useDms, useDokInbox, useFriendRequests } from "../../api/hooks";
+import { useClassSpace, useDms, useDokInbox, useFriendRequests } from "../../api/hooks";
 import { useLive } from "../../store/live";
 import { threadLabel } from "../../utils/dok";
 import { Avatar } from "../Avatar";
@@ -14,11 +14,13 @@ export function HomeSidebar() {
   const dms = useDms();
   const requests = useFriendRequests();
   const dok = useDokInbox();
+  const classSpace = useClassSpace();
   const presence = useLive((state) => state.presence);
   const [searching, setSearching] = useState(false);
   const pending = requests.data?.incoming.length ?? 0;
   const dokThreads = dok.data?.threads ?? [];
   const dokUnread = dok.data?.unread ?? 0;
+  const classUnread = classSpace.data?.unread ?? 0;
   return (
     <div className="sidebar__scroll">
       <button type="button" className="search-button" onClick={() => setSearching(true)}>
@@ -36,6 +38,10 @@ export function HomeSidebar() {
         <NavLink to="/app/dok" end className={({ isActive }) => `nav-item${isActive ? " is-active" : ""}`}>
           <Icon name="megaphone" /> {t("nav.dok")}
           {dokUnread > 0 ? <span className="badge-count">{dokUnread}</span> : null}
+        </NavLink>
+        <NavLink to="/app/class-space" className={({ isActive }) => `nav-item${isActive ? " is-active" : ""}`}>
+          <Icon name="school" /> {t("nav.class_space")}
+          {classUnread > 0 ? <span className="badge-count">{classUnread}</span> : null}
         </NavLink>
       </nav>
       {dokThreads.length > 0 ? (
