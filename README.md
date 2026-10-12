@@ -4,7 +4,6 @@ A Discord-style communication platform built for one school. Students prove they
 
 - Default language **Hungarian**, plus **English** and **German** (whole UI, errors, validation, tooltips, accessibility labels).
 - Original branding: a squared school notebook (cool paper, faint blue grid, red margin line) with a chalkboard dark theme. No third-party chat-platform assets.
-- The source code contains **no comments** (enforced by tests). This README is the documentation.
 - The supplied E-Kréta login script is used **exactly as provided**. It is never edited, rewritten or replaced (see [section 9](#9-e-kréta-integration-setup)).
 
 ## Table of contents
