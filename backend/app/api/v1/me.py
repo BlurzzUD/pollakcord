@@ -25,7 +25,7 @@ HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 GRADIENT = re.compile(r"^linear-gradient\(\s*\d{1,3}deg\s*,\s*#[0-9a-fA-F]{6}\s*,\s*#[0-9a-fA-F]{6}\s*\)$")
 THEME_COLOR_KEYS = ("bg", "bg_alt", "bg_deep", "text", "text_muted", "accent", "accent_text", "danger", "mention", "border")
 THEME_KEYS = THEME_COLOR_KEYS + ("background", "radius")
-NOTIFICATION_KEYS = ("friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "dok", "sounds")
+NOTIFICATION_KEYS = ("friend_requests", "direct_messages", "mentions", "server", "calls", "moderation", "dok", "forms", "sounds")
 MAX_THEMES = 12
 
 

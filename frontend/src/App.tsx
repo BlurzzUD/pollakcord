@@ -8,6 +8,9 @@ import { ClassSpacePage } from "./pages/ClassSpacePage";
 import { DmPage } from "./pages/DmPage";
 import { DokPage } from "./pages/DokPage";
 import { DokThreadPage } from "./pages/DokThreadPage";
+import { FormPage } from "./pages/FormPage";
+import { FormResultsPage } from "./pages/FormResultsPage";
+import { FormsPage } from "./pages/FormsPage";
 import { FriendsPage } from "./pages/FriendsPage";
 import { HomePage } from "./pages/HomePage";
 import { InvitePage } from "./pages/InvitePage";
@@ -47,6 +50,9 @@ export function App() {
         <Route path="dok" element={<DokPage />} />
         <Route path="dok/:threadId" element={<DokThreadPage />} />
         <Route path="class-space" element={<ClassSpacePage />} />
+        <Route path="forms" element={<FormsPage />} />
+        <Route path="forms/:formId" element={<FormPage />} />
+        <Route path="forms/:formId/results" element={<FormResultsPage />} />
         <Route path="server/:serverId/:channelId?" element={<ServerPage />} />
         <Route path="moderation" element={<ModerationPage />} />
       </Route>

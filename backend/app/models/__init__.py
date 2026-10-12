@@ -2,6 +2,7 @@ from .audit import AuditLog, Notification
 from .auth import AuthMethod, AuthSession, RecoveryCode, TotpConfig
 from .class_space import ClassSpaceMember, ClassSpaceMessage
 from .dok import DokMessage, DokThread
+from .forms import Form, FormAnswer, FormQuestion, FormResponse
 from .message import (
     Conversation,
     DataKey,
@@ -41,6 +42,10 @@ __all__ = [
     "DataKey",
     "DokMessage",
     "DokThread",
+    "Form",
+    "FormAnswer",
+    "FormQuestion",
+    "FormResponse",
     "FriendRequest",
     "Friendship",
     "Invite",

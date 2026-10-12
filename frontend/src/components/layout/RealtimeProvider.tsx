@@ -98,6 +98,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     invalidateSoon(["class-space"]);
   });
 
+  useRealtimeEvent("form.changed", () => {
+    invalidateSoon(["forms"]);
+  });
+
   useRealtimeEvent<AppNotification>("notification.create", (notification) => {
     invalidateSoon(["notifications"]);
     const viewing =

@@ -101,6 +101,23 @@ class DokScope(StrEnum):
     SCHOOL = "school"
 
 
+class FormScope(StrEnum):
+    CLASS = "class"
+    SCHOOL = "school"
+
+
+class FormStatus(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class FormQuestionType(StrEnum):
+    SHORT_TEXT = "short_text"
+    LONG_TEXT = "long_text"
+    SINGLE_CHOICE = "single_choice"
+    MULTIPLE_CHOICE = "multiple_choice"
+
+
 class RoleKind(StrEnum):
     MEMBER = "member"
     MODERATOR = "moderator"
@@ -124,6 +141,7 @@ class NotificationType(StrEnum):
     CALL_MISSED = "call_missed"
     MODERATION = "moderation"
     DOK_MESSAGE = "dok_message"
+    FORM_AVAILABLE = "form_available"
 
 
 class AuditAction(StrEnum):
@@ -157,3 +175,9 @@ class AuditAction(StrEnum):
     PLATFORM_REPORT_VIEW = "platform.report_view"
     ACCOUNT_RECOVERY = "account.recovery"
     DOK_MESSAGE_SEND = "dok.message_send"
+    FORM_CREATE = "form.create"
+    FORM_UPDATE = "form.update"
+    FORM_CLOSE = "form.close"
+    FORM_REOPEN = "form.reopen"
+    FORM_DELETE = "form.delete"
+    FORM_RESULTS_VIEW = "form.results_view"

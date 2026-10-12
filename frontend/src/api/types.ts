@@ -34,7 +34,7 @@ export interface ChatAppearance {
 }
 
 export type NotificationPrefs = Record<
-  "friend_requests" | "direct_messages" | "mentions" | "server" | "calls" | "moderation" | "dok" | "sounds",
+  "friend_requests" | "direct_messages" | "mentions" | "server" | "calls" | "moderation" | "dok" | "forms" | "sounds",
   boolean
 >;
 
@@ -234,7 +234,7 @@ export interface InviteEntry {
 
 export interface AppNotification {
   id: Id;
-  type: "friend_request" | "friend_accepted" | "dm" | "mention" | "server" | "call_incoming" | "call_missed" | "moderation" | "dok_message";
+  type: "friend_request" | "friend_accepted" | "dm" | "mention" | "server" | "call_incoming" | "call_missed" | "moderation" | "dok_message" | "form_available";
   payload: Record<string, any>;
   read: boolean;
   created_at: string;
@@ -377,4 +377,106 @@ export interface ClassSpaceHistoryPage {
   messages: ClassSpaceMessage[];
   has_more: boolean;
   last_read_message_id: Id | null;
+}
+
+export type FormStatus = "open" | "closed";
+export type FormQuestionType = "short_text" | "long_text" | "single_choice" | "multiple_choice";
+export type FormCreatorRole = "dok_president" | "school_moderator" | "school_admin";
+export type FormTarget = { type: "school" } | { type: "class"; class_id: Id; code: string | null };
+
+export interface FormOption {
+  id: Id;
+  label: string;
+}
+
+export interface FormQuestion {
+  id: Id;
+  position: number;
+  type: FormQuestionType;
+  label: string;
+  required: boolean;
+  options: FormOption[];
+}
+
+export interface FormSummary {
+  id: Id;
+  title: string;
+  description: string;
+  target: FormTarget;
+  status: FormStatus;
+  creator_role: FormCreatorRole;
+  created_at: string;
+  closed_at: string | null;
+  question_count: number;
+  targeted: boolean;
+  submitted: boolean;
+  submitted_at: string | null;
+  can_fill: boolean;
+  can_manage: boolean;
+  can_view_results: boolean;
+  response_count: number | null;
+  creator: UserCard | null;
+}
+
+export interface FormDetail extends FormSummary {
+  questions: FormQuestion[];
+}
+
+export interface FormList {
+  items: FormSummary[];
+}
+
+export interface FormSubmission {
+  form_id: Id;
+  submitted: boolean;
+  submitted_at: string;
+}
+
+export interface FormAnswerPayload {
+  question_id: Id;
+  text?: string;
+  options?: Id[];
+}
+
+export interface FormCreateQuestion {
+  type: FormQuestionType;
+  label: string;
+  required: boolean;
+  options: string[];
+}
+
+export interface FormCreateBody {
+  title: string;
+  description: string;
+  target: { type: "school" } | { type: "class"; class_id: Id };
+  questions: FormCreateQuestion[];
+}
+
+export type FormAnswerValue = { text: string } | { options: Id[] };
+
+export interface FormResultOption {
+  id: Id;
+  label: string;
+  count: number;
+}
+
+export interface FormResultSummary {
+  question_id: Id;
+  type: FormQuestionType;
+  answered: number;
+  options: FormResultOption[];
+}
+
+export interface FormResultResponse {
+  id: Id;
+  user: UserCard | null;
+  submitted_at: string;
+  answers: Record<Id, FormAnswerValue | null>;
+}
+
+export interface FormResults {
+  total: number;
+  summary: FormResultSummary[];
+  responses: FormResultResponse[];
+  has_more: boolean;
 }

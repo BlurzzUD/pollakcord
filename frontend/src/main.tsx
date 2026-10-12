@@ -17,6 +17,7 @@ import "./styles/layout.css";
 import "./styles/components.css";
 import "./styles/chat.css";
 import "./styles/pages.css";
+import "./styles/forms.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } },

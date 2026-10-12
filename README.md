@@ -50,6 +50,7 @@ A Discord-style communication platform built for one school. Students prove they
 | Direct messages | Text, replies, reactions, delete own, timestamps, read/unread, report, block, voice calls |
 | DÖK messages | Student-government announcements in their own inbox next to Friends and Direct messages. Recipients see only the role (*DÖK képviselő* / *DÖK elnök*), never the sender; the server always stores the real author. Each message creates a notification that can be dismissed after three seconds |
 | Class spaces | A private chat for each school class (for example 9A), separate from servers and from the DÖK. Members are the users whose declared class matches. Each member answers once whether their username is shown to classmates; otherwise classmates see only a *Classmate* label with a short id. Already registered users are asked on their next visit, and nobody is added before answering |
+| School forms | Official school questionnaires (Google Forms style, not channel polls) created by the school admin, school moderators and the DÖK president. A form targets the whole school or one class; only people in that audience can open and answer it, once per account. Answers are encrypted, and only the creator, moderators and admins can read the results |
 | Servers | Create/join/leave, invites (`/invite/<code>`), categories, text and voice channels, roles (Owner, Administrator, Moderator, Member + custom), 18 permissions, per-category and per-channel overwrites, pins, slowmode, timeouts, kick/ban, audit log, server reports |
 | Voice | WebRTC peer-to-peer mesh, end-to-end encrypted (DTLS-SRTP), speaking indicators, mute/deafen, server-side mute/deafen requests, DM calls with ringing, call security code |
 | Search | Friends, users, servers, channels and messages (permission-filtered, accent-insensitive whole-word message search over encrypted data) |
@@ -132,19 +133,19 @@ pollakcord/
 ├── backend/
 │   ├── alembic.ini  pytest.ini  requirements.txt  requirements-dev.txt
 │   ├── docker/entrypoint.sh
-│   ├── migrations/                 env.py, script.py.mako, versions/0001_initial_schema.py, 0002_dok_messaging.py, 0003_class_spaces.py
+│   ├── migrations/                 env.py, script.py.mako, versions/0001_initial_schema.py, 0002_dok_messaging.py, 0003_class_spaces.py, 0004_forms.py
 │   ├── app/
 │   │   ├── main.py  config.py  cli.py  seed.py  spa.py  ids.py  i18n.py  errors.py  logging_config.py
 │   │   ├── locales/                hu.json  en.json  de.json     (API error messages, server defaults)
-│   │   ├── api/                    deps.py, v1/{auth,me,users,friends,dms,class_spaces,servers,channels,invites,
+│   │   ├── api/                    deps.py, v1/{auth,me,users,friends,dms,class_spaces,forms,servers,channels,invites,
 │   │   │                           search,notifications,uploads,rtc,moderation,meta,messaging,router}.py
 │   │   ├── crypto/                 keyring.py  envelope.py  blind_index.py
 │   │   ├── db/                     base.py  session.py  types.py
 │   │   ├── integrations/kreta/     adapter.py  flows.py  script.sha256  script/kreta_login_from_dumps.py
-│   │   ├── models/                 users, auth, social, servers, messages, class_space, audit/notifications, enums
+│   │   ├── models/                 users, auth, social, servers, messages, class_space, forms, audit/notifications, enums
 │   │   ├── realtime/               hub.py  voice.py  ws.py  outbox.py
 │   │   ├── security/               passwords  totp  recovery  sessions  middleware  ratelimit  deps_ip  audit_helpers
-│   │   └── services/               permissions  privacy  messages  servers  accounts  people  class_spaces
+│   │   └── services/               permissions  privacy  messages  servers  accounts  people  class_spaces  forms
 │   │                               notifications  uploads  css_sanitizer  audit  serializers
 │   └── tests/                      ~250 tests, incl. tests/kreta_fake/ (HTTP stand-in for E-Kréta)
 └── frontend/
@@ -152,12 +153,12 @@ pollakcord/
     ├── scripts/check-no-comments.mjs
     └── src/
         ├── api/        client (CSRF, errors, language header), types, hooks
-        ├── components/ Avatar, Modal, Field, Toasts, chat/*, classspace/*, layout/*
+        ├── components/ Avatar, Modal, Field, Toasts, chat/*, classspace/*, forms/*, layout/*
         ├── i18n/       index.ts, locales/{hu,en,de}.json
-        ├── pages/      auth/*, settings/*, server/*, Home, Friends, Dm, ClassSpace, Invite, Moderation
+        ├── pages/      auth/*, settings/*, server/*, Home, Friends, Dm, ClassSpace, Forms, Form, FormResults, Invite, Moderation
         ├── realtime/   socket.ts (reconnect, resubscribe), useRealtimeEvent.ts
         ├── store/      auth, ui, live, classSpace (zustand)
-        ├── styles/     tokens, base, layout, components, chat, pages (.css)
+        ├── styles/     tokens, base, layout, components, chat, pages, forms (.css)
         ├── theme/      ThemeProvider, tokens
         ├── voice/      VoiceManager (WebRTC mesh), useVoice, securityCode
         └── test/       vitest suites
@@ -328,7 +329,7 @@ CREATE DATABASE pollakcord OWNER pollakcord ENCODING 'UTF8';
 
 Set `POLLAKCORD_DATABASE_URL=postgresql+asyncpg://pollakcord:change-me@db-host:5432/pollakcord`, then run the migrations ([section 8](#8-database-migrations)). Docker Compose does all of this for you.
 
-### Schema overview (37 tables)
+### Schema overview (41 tables)
 
 | Group | Tables |
 | --- | --- |
@@ -337,6 +338,7 @@ Set `POLLAKCORD_DATABASE_URL=postgresql+asyncpg://pollakcord:change-me@db-host:5
 | Social | `friendships`, `friend_requests`, `blocks` |
 | Servers | `servers`, `roles`, `server_members`, `member_roles`, `categories`, `channels`, `permission_overwrites`, `invites`, `bans` |
 | Messaging | `conversations`, `data_keys`, `messages` (metadata), `message_contents` (ciphertext), `message_reactions`, `read_states`, `message_mentions`, `message_search_tokens`, `dok_threads`, `dok_messages` (ciphertext), `class_space_members`, `class_space_messages` (ciphertext) |
+| Forms | `forms`, `form_questions`, `form_responses`, `form_answers` (ciphertext) |
 | Moderation | `reports` (encrypted snapshots), `audit_logs`, `notifications` |
 
 IDs are time-ordered 63-bit snowflakes, returned to clients as strings. Invite codes are 10 random base-62 characters (about 60 bits).
@@ -356,6 +358,7 @@ alembic current
 - `migrations/versions/0001_initial_schema.py` creates every table and **seeds the 12 classes**: 9A, 9B, 10A, 10B, 11A, 11B, 12A, 12B, 13A, 13B, 14A, 14B.
 - `migrations/versions/0002_dok_messaging.py` adds `dok_threads` and `dok_messages`. It is additive: no existing table is changed.
 - `migrations/versions/0003_class_spaces.py` adds `class_space_members` and `class_space_messages`. It is additive: no existing table is changed and nothing is seeded, because a class space exists implicitly for every active row of `school_classes` (a class added later has its space at once, an empty database needs no extra step). Its downgrade drops only those two tables.
+- `migrations/versions/0004_forms.py` adds `forms`, `form_questions`, `form_responses` and `form_answers`. It is additive: no existing table is changed and nothing is seeded. Its downgrade drops only those four tables.
 - A test asserts that the migrated schema is exactly what the models describe.
 
 ### Changing the classes later
@@ -598,7 +601,7 @@ Do not enable HTTP compression for API responses that mix secrets with attacker-
 
 Client operations: `ping`, `subscribe`, `unsubscribe`, `typing`, `voice.join`, `voice.leave`, `voice.signal`, `voice.state`, `voice.moderate`, `call.invite`, `call.accept`, `call.decline`, `call.cancel`.
 
-Server events (envelope `{ "t": <event>, "d": <data> }`): `ready`, `message.create`, `message.delete`, `reaction.update`, `message.pin`, `typing`, `presence.update`, `friend.request|added|removed`, `notification.create`, `dok.message`, `class_space.message`, `server.joined|removed|updated`, `structure.changed`, `member.joined|left|updated`, `role.changed`, `channel.activity`, `read.update`, `voice.*`, `call.*`, `error`.
+Server events (envelope `{ "t": <event>, "d": <data> }`): `ready`, `message.create`, `message.delete`, `reaction.update`, `message.pin`, `typing`, `presence.update`, `friend.request|added|removed`, `notification.create`, `dok.message`, `class_space.message`, `form.changed`, `server.joined|removed|updated`, `structure.changed`, `member.joined|left|updated`, `role.changed`, `channel.activity`, `read.update`, `voice.*`, `call.*`, `error`.
 
 Events are published only after the database transaction commits.
 
@@ -768,6 +771,30 @@ API (`/api/v1/class-spaces`): `GET /me`, `PUT /me/visibility`, `GET /{class}/mem
 
 Known limits: the class is self-declared, so a space is only as trustworthy as that declaration; nothing proves that someone belongs to the class beyond their E-Kréta account binding. Anonymity is towards classmates only, because moderators can resolve an author through a report. Messages cannot be edited, and a moderator cannot remove a message directly (they can suspend the sender).
 
+### School forms
+
+Forms are official, school-run questionnaires: a thin layer for questions the school or the student government needs answered, not a form builder and not the channel polls. They appear as **Űrlapok** in the home sidebar, next to the DÖK and the class space.
+
+| Role | Create and manage | Read results |
+| --- | --- | --- |
+| `school_admin` | Yes, and can close, reopen or delete **any** form | Every form |
+| `school_moderator` | Yes, and can close, reopen or delete **their own** forms | Every form |
+| `dok_president` | Yes, their own forms only | Only forms they created, never another president's |
+| `dok_representative` | No | No (can answer forms addressed to them) |
+| `user` | No | No (can answer forms addressed to them) |
+
+- **Targeting is enforced by the server.** A form targets the **whole school** (every active user who has set a class) or **one active class**. Only people in that audience can open or answer it; for everyone else it does not exist (plain 404, also for staff outside the audience who try to answer). Staff who may read the results can open the form itself to see its questions.
+- **Class membership is self-declared.** Targeting inherits it: users choose their class when they register and can change it later, so a class-targeted form reaches whoever declares that class. Do not use forms for anything that needs verified class membership.
+- **One response per account.** A response is bound to the account (unique per form and user). There are no public or anonymous links, and answers cannot be edited after sending. A closed form accepts no new answers and keeps its results; reopening it accepts answers again.
+- **Question types (v1).** Short text (one line, 200 characters), long text (2,000 characters), single choice and multiple choice (2 to 12 options). Up to 30 questions per form, each optionally required. Questions cannot be edited after publishing; title, description and status can. Not in v1: files, scales, dates, sections or branching, quiz scoring, spreadsheet export, public links.
+- **Results and identity.** Staff see the counts for every choice question and every text answer with the respondent's platform display name and username, never the E-Kréta real name; no new identity-reveal path exists and the audited reveal in the moderation tools is unchanged. Peers never see each other's answers. Addressees see only the creator's role label (*DÖK elnök* or *Iskolai személyzet*), never the person. A creator who loses their role also loses access to that form's results.
+- **Encrypted at rest.** Every answer (text and selected options) is sealed with AES-256-GCM under `enc/form-answer` (AAD `form|<form id>|<response id>|<question id>`), so a database backup alone shows no answers and swapped rows fail authentication. Titles, descriptions, questions and options are stored as plain text because every addressee sees them anyway.
+- **Notifications and realtime.** Publishing creates one `form_available` notification per addressee (not for the creator), subject to the `forms` notification preference (on by default, with its own toggle under Settings, Notifications). Reopening does not notify again. A `form.changed` WebSocket event (the form id only) refreshes open lists and results. It goes to the addressees and the creator when a form is published, edited, closed, reopened or deleted, and to the creator and the person who answered when an answer arrives. The list and the results also refetch when the window regains focus.
+- **Audit.** The platform log records `form.create`, `form.update`, `form.close`, `form.reopen`, `form.delete` and `form.results_view` (only when someone other than the creator opens the first page of results), always with the actor and form, never with answers. Deleting a form removes its questions, responses, answers and notifications in one transaction.
+- **Rate limits (per user).** 20 forms per hour, 30 submissions per 10 minutes, and 120 requests per minute each for the form list and for results.
+
+API (`/api/v1/forms`): `GET /` (forms visible to me, with `can_fill`, `can_manage` and `can_view_results`), `POST /`, `GET /{id}`, `PATCH /{id}` (title, description, `status` open or closed), `DELETE /{id}`, `POST /{id}/responses`, `GET /{id}/responses` (results, newest first, `before` cursor), `GET /{id}/me`.
+
 ---
 
 ## 21. Encryption architecture
@@ -786,6 +813,7 @@ MASTER_KEY (env / secret file, id k1)         PEPPER (separate secret)
    ├─ "enc/totp"            TOTP secrets         ├─ "mac/search-index"     message search tokens
    ├─ "enc/dok-message"     DÖK message bodies   ├─ "mac/login-method"     decoy answers for unknown users
    ├─ "enc/class-space-message"  class bodies    └─ "mac/class-space-alias" anonymous class labels
+   ├─ "enc/form-answer"     form answers
    └─ "enc/report-snapshot" report evidence
         │
         └─ per-conversation / per-channel data key (DEK, 32 random bytes), stored wrapped in `data_keys`
@@ -865,7 +893,7 @@ Remember:
 - **Text messages are not end-to-end encrypted** (by design, for moderation). See [section 21](#21-encryption-architecture).
 - **E-Kréta login depends on the supplied scripted web flow.** E-Kréta changes can break it; the adapter fails closed and tests detect marker drift. The script's own plaintext logging is neutralized by isolation, not by editing it.
 - **Typing school credentials into a third-party site is inherently risky** (phishing precedent, possible terms-of-service issues). See the note in [section 9](#authorization-and-data-protection-note).
-- **Class is self-declared**, not verified. The script only returns a name. Class spaces inherit this: anyone can choose a class and then joins that class's space.
+- **Class is self-declared**, not verified. The script only returns a name. Class spaces inherit this: anyone can choose a class and then joins that class's space. Class-targeted forms inherit it too.
 - **One process only** (in-memory hub, flow store, limiter). No Redis adapter yet.
 - **Mesh voice** is limited to 8 people and server mute is cooperative.
 - **Message search is whole-word only.**
@@ -896,11 +924,12 @@ About 270 tests, all against a throw-away SQLite database. Highlights:
 | Security | Headers, CSP, HSTS, rate limiting, trusted-proxy handling, log redaction, error masking, invite/ID randomness, Argon2id, no comments or docstrings in Python sources |
 | DÖK messaging | Representatives limited to their own class, presidents to any class or the school, no real author or `staff` flag for recipients, notification create/mark-read/mute, unauthorized sends, class lock, thread visibility, pagination, per-user and per-target rate limits, audit record with the real author, encrypted and row-bound bodies, suspension, WebSocket event contents, CLI |
 | Class spaces | No class means no space, the one-time prompt flag, Yes and No (member list, message authors and anonymous labels, no username, id or display name in peer payloads), stable per-member aliases, per-message visibility, class change and clearing, stale rows, retired classes, plain 404 for non-members, other classes, staff and DÖK roles, malformed ids, reports and moderator access, pagination, unread counts, delete-own, validation, encrypted and row-bound bodies, rate limits, suspension, WebSocket event contents, no widening of profile, DM, search or suggestion rules |
+| School forms | Only the school admin, moderators and the DÖK president can create (representatives and students refused), class and whole-school targeting (other classes and users without a class get a plain 404), one response per account, results limited to the creator, moderators and admins (other presidents, students and a creator who lost the role refused), closed and reopened forms, validation of titles, questions, options and answers, encrypted and row-bound answers, aggregation and pagination of results, platform names instead of real names, notifications and the forms preference, suspension, audit entries without answers, deletion of everything a form owns, rate limits, WebSocket event contents, error messages in the requested language |
 | Migrations | Migrated schema equals the models, seed data present, downgrade works |
 
 ### Frontend (`cd frontend && npm test`)
 
-89 tests: translation key/placeholder parity and coverage of every used key, API client (CSRF, retry, errors, uploads), realtime client (reconnect, resubscribe, expired session), E-Kréta confirmation ("Te vagy ...?" Igen/Nem and 2FA), login, composer mentions, inert message rendering, accessibility primitives, theme provider and custom CSS injection, call security code, the DÖK inbox (role labels instead of names, the three-second dismiss rule, composer targets and whole-school confirmation, role guards), class spaces (the one-time prompt appears only when required and only once answered, Yes and No call the right endpoint, labels and member list respect the username choice, composer, delete and report, settings control, sidebar entry, translations), and a no-comments check.
+Frontend tests: translation key/placeholder parity and coverage of every used key, API client (CSRF, retry, errors, uploads), realtime client (reconnect, resubscribe, expired session), E-Kréta confirmation ("Te vagy ...?" Igen/Nem and 2FA), login, composer mentions, inert message rendering, accessibility primitives, theme provider and custom CSS injection, call security code, the DÖK inbox (role labels instead of names, the three-second dismiss rule, composer targets and whole-school confirmation, role guards), class spaces (the one-time prompt appears only when required and only once answered, Yes and No call the right endpoint, labels and member list respect the username choice, composer, delete and report, settings control, sidebar entry, translations), school forms (the create button only for the three creator roles, editor validation and payload, required answers, the already-submitted and closed states, the results guard, aggregates and pagination, sidebar entry, notification text, the settings toggle, translations), and a no-comments check.
 
 ### Static checks
 
@@ -908,7 +937,7 @@ About 270 tests, all against a throw-away SQLite database. Highlights:
 
 ### Status at packaging time
 
-The complete backend suite passed at its last full run (248 tests; one further test was added afterwards and passed on its own), the frontend suite passed (56 tests), and the production frontend build succeeded. The class-space suites (`backend/tests/test_class_spaces.py`, `frontend/src/test/classSpace.test.tsx`) were added afterwards in an environment without package installation, so they have not been run yet; run both suites, `npm run typecheck` and `npm run build` before merging. No automated tests exercise PostgreSQL, a real TURN server, real browsers' WebRTC stacks or the live E-Kréta service; test those in staging.
+The complete backend suite passed at its last full run (248 tests; one further test was added afterwards and passed on its own), the frontend suite passed (56 tests), and the production frontend build succeeded. The class-space suites (`backend/tests/test_class_spaces.py`, `frontend/src/test/classSpace.test.tsx`) and the forms suites (`backend/tests/test_forms.py`, `frontend/src/test/forms.test.tsx`) were added afterwards in an environment without package installation, so they have not been run yet; run both suites, `npm run typecheck` and `npm run build` before merging. No automated tests exercise PostgreSQL, a real TURN server, real browsers' WebRTC stacks or the live E-Kréta service; test those in staging.
 
 ---
 

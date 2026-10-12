@@ -35,5 +35,9 @@ export function describeNotification(t: Translate, notification: AppNotification
         href: `/app/dok/${p.thread_id}`,
       };
     }
+    case "form_available": {
+      const place = p.scope === "class" ? t("forms.target_class", { code: p.class_code ?? "" }) : t("forms.target_school");
+      return { text: t("notifications.form_available", { title: p.title ?? "", place }), href: `/app/forms/${p.form_id}` };
+    }
   }
 }

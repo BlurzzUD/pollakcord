@@ -23,6 +23,7 @@ from .security.sessions import CookieNames
 from .seed import ensure_school_classes
 from .services.class_spaces import ClassSpaceService
 from .services.dok import DokService
+from .services.forms import FormService
 from .services.messages import MessageService
 from .services.uploads import media_path
 from .spa import mount_frontend
@@ -68,6 +69,7 @@ def create_app(settings: Settings | None = None, kreta_adapter: KretaAuthPort | 
         app.state.voice = VoiceManager(settings.voice_max_participants)
         app.state.messages = MessageService(vault, settings)
         app.state.dok = DokService(vault, settings)
+        app.state.forms = FormService(vault)
         app.state.class_spaces = ClassSpaceService(vault, settings)
         app.state.kreta_flows = flows
         from .realtime.ws import install_revalidator

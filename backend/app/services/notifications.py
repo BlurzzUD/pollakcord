@@ -19,6 +19,7 @@ PREFERENCE_KEY = {
     NotificationType.CALL_MISSED: "calls",
     NotificationType.MODERATION: "moderation",
     NotificationType.DOK_MESSAGE: "dok",
+    NotificationType.FORM_AVAILABLE: "forms",
 }
 
 

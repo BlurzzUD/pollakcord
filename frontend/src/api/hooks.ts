@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "../store/auth";
+import { canCreateForms } from "../utils/roles";
 import { api } from "./client";
 import type {
   AppNotification,
@@ -10,6 +11,9 @@ import type {
   Conversation,
   DokHistoryPage,
   DokInbox,
+  FormDetail,
+  FormList,
+  FormResults,
   FriendRequestEntry,
   Member,
   Meta,
@@ -107,5 +111,37 @@ export function useClassSpaceMessages(classId: string | undefined) {
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api.get<ClassSpaceHistoryPage>(`/class-spaces/${classId}/messages`, { limit: 50, before: pageParam }),
     getNextPageParam: (last) => (last.has_more ? last.messages[0]?.id : undefined),
+  });
+}
+
+export function useForms() {
+  const classCode = useAuth((state) => state.me?.class_code);
+  const role = useAuth((state) => state.me?.platform_role);
+  return useQuery({
+    queryKey: ["forms", "list", classCode ?? null, role ?? null],
+    queryFn: () => api.get<FormList>("/forms"),
+    enabled: Boolean(classCode) || canCreateForms(role),
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useForm(formId: string | undefined) {
+  return useQuery({
+    queryKey: ["forms", "detail", formId],
+    queryFn: () => api.get<FormDetail>(`/forms/${formId}`),
+    enabled: Boolean(formId),
+    retry: false,
+  });
+}
+
+export function useFormResults(formId: string | undefined, allowed: boolean) {
+  return useInfiniteQuery({
+    queryKey: ["forms", "results", formId],
+    enabled: Boolean(formId) && allowed,
+    retry: false,
+    refetchOnWindowFocus: true,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.get<FormResults>(`/forms/${formId}/responses`, { limit: 50, before: pageParam }),
+    getNextPageParam: (last) => (last.has_more ? last.responses[last.responses.length - 1]?.id : undefined),
   });
 }
