@@ -965,3 +965,5 @@ The complete backend suite passed at its last full run (248 tests; one further t
 | Locked out after failed logins | Wait for the delay shown, or recover through E-Kréta or a recovery code |
 
 Logs are JSON on stdout (`docker compose logs -f api`). Each request has an `X-Request-ID`; search for it to follow one request. Raise detail with `POLLAKCORD_LOG_LEVEL=DEBUG` (secrets stay redacted).
+
+wow you read it this deep 
