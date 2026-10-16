@@ -7,6 +7,7 @@ import { encodeMentions } from "../../utils/text";
 import { Avatar } from "../Avatar";
 import { ErrorText } from "../ErrorText";
 import { Icon } from "../Icon";
+import { SlashAutocomplete, type SlashHandle } from "./SlashAutocomplete";
 import { GiphyPicker } from "./GiphyPicker";
 import { formatFileSize } from "./MessageMedia";
 import { useComposerMedia } from "./useComposerMedia";
@@ -45,6 +46,8 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
   const currentTarget = useRef(typingTarget.id);
   currentTarget.current = typingTarget.id;
   const area = useRef<HTMLTextAreaElement>(null);
+  const slash = useRef<SlashHandle>(null);
+  const slashOpen = typingTarget.scope === "channel" && text.startsWith("/") && !disabledReason;
   const lastTyping = useRef(0);
 
   useEffect(() => {
@@ -101,6 +104,7 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
   };
 
   const submit = async () => {
+    if (slashOpen) { slash.current?.openFirst(); return; }
     const content = encodeMentions(text.trim(), picks);
     const hasMedia = media.attachments.length > 0 || Boolean(media.giphyId);
     if ((!content && !hasMedia) || busy || media.uploading || disabledReason) {
@@ -129,6 +133,7 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!event.nativeEvent.isComposing && slashOpen && slash.current?.keyDown(event.key)) { event.preventDefault(); return; }
     if (suggestions.length > 0) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
@@ -159,7 +164,8 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
           </button>
         </div>
       ) : null}
-      {suggestions.length > 0 ? (
+      {slashOpen ? <SlashAutocomplete ref={slash} channelId={typingTarget.id} text={text} onComplete={() => { setText(""); setPicks({}); onCancelReply(); }} /> : null}
+      {suggestions.length > 0 && !slashOpen ? (
         <ul className="composer__mentions" role="listbox" aria-label={t("message.mention_suggestions")}>
           {suggestions.map((candidate, index) => (
             <li key={candidate.id} role="option" aria-selected={index === active}>

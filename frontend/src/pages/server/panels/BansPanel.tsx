@@ -1,3 +1,4 @@
+import { BotBadge } from "../../../components/BotBadge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
@@ -28,7 +29,7 @@ export function BansPanel({ server }: { server: ServerDetail }) {
             <span className="people__main">
               <Avatar name={ban.user.display_name} url={ban.user.avatar_url} size={36} />
               <span>
-                <strong>{ban.user.display_name}</strong>
+                <strong>{ban.user.display_name}</strong> <BotBadge isBot={ban.user.is_bot} />
                 <span className="muted">
                   {ban.reason || t("server.no_reason")} · {formatDateTime(ban.created_at)}
                 </span>

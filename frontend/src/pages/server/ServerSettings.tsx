@@ -5,6 +5,7 @@ import type { ServerDetail } from "../../api/types";
 import { Modal } from "../../components/Modal";
 import { can } from "../../utils/permissions";
 import { AuditPanel } from "./panels/AuditPanel";
+import { BotsPanel } from "./panels/BotsPanel";
 import { BansPanel } from "./panels/BansPanel";
 import { ChannelsPanel } from "./panels/ChannelsPanel";
 import { InviteManager } from "./InviteManager";
@@ -13,7 +14,7 @@ import { OverviewPanel } from "./panels/OverviewPanel";
 import { ReportsPanel } from "./panels/ReportsPanel";
 import { RolesPanel } from "./panels/RolesPanel";
 
-type Tab = "overview" | "roles" | "channels" | "members" | "invites" | "bans" | "reports" | "audit";
+type Tab = "bots" | "overview" | "roles" | "channels" | "members" | "invites" | "bans" | "reports" | "audit";
 
 export function ServerSettings({ server, onClose }: { server: ServerDetail; onClose: () => void }) {
   const { t } = useTranslation();
@@ -21,6 +22,7 @@ export function ServerSettings({ server, onClose }: { server: ServerDetail; onCl
   const tabs: Tab[] = (
     [
       ["overview", true],
+      ["bots", allowed("administrator")],
       ["roles", allowed("manage_roles")],
       ["channels", allowed("manage_channels")],
       ["members", allowed("manage_members") || allowed("kick_members") || allowed("manage_roles")],
@@ -45,6 +47,7 @@ export function ServerSettings({ server, onClose }: { server: ServerDetail; onCl
           ))}
         </div>
         <div role="tabpanel" className="settings-modal__panel">
+          {tab === "bots" ? <BotsPanel server={server} /> : null}
           {tab === "overview" ? <OverviewPanel server={server} /> : null}
           {tab === "roles" ? <RolesPanel server={server} /> : null}
           {tab === "channels" ? <ChannelsPanel server={server} /> : null}

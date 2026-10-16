@@ -9,6 +9,7 @@ export interface UserCard {
   display_name: string;
   avatar_url: string | null;
   staff: boolean;
+  is_bot?: boolean;
   nickname?: string | null;
   is_member?: boolean;
   presence?: Presence;
@@ -203,7 +204,7 @@ export interface Role {
   permissions: number;
   permission_names: string[];
   is_default: boolean;
-  kind: "member" | "moderator" | "administrator" | "custom";
+  kind: "member" | "moderator" | "administrator" | "custom" | "bot";
 }
 
 export interface Category {
@@ -517,4 +518,39 @@ export interface FormResults {
   summary: FormResultSummary[];
   responses: FormResultResponse[];
   has_more: boolean;
+}
+
+export interface BotApplication {
+  user: Omit<Profile, "shared_servers">;
+  bot_id: Id;
+  created_at: string;
+  install_code: string;
+}
+
+export interface BotInstall extends BotApplication {
+  permissions: string[];
+  online: boolean;
+}
+
+export interface BotIntegrations {
+  bots: BotInstall[];
+  available_permissions: string[];
+  default_permissions: string[];
+}
+
+export interface BotCommandOption {
+  name: string;
+  description: string;
+  type: "string" | "int" | "bool" | "channel" | "user";
+  required: boolean;
+}
+
+export interface BotCommand {
+  id: Id;
+  bot_id: Id;
+  name: string;
+  description: string;
+  options: BotCommandOption[];
+  default_member_permissions: number;
+  bot: UserCard;
 }

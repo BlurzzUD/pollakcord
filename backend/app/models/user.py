@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, created_column, id_column
@@ -46,8 +46,10 @@ class SchoolClass(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (CheckConstraint("NOT is_bot OR (platform_role = 'user' AND school_class_id IS NULL)", name="bot_school_boundary"),)
 
     id: Mapped[int] = id_column()
+    is_bot: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     username: Mapped[str] = mapped_column(String(32))
     username_lower: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(40))

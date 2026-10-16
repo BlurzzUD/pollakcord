@@ -88,7 +88,7 @@ async def send_request(
     generic = {"status": "sent"}
     if target is not None and target.id == auth.user.id:
         raise AppError("cannot_friend_self", 422)
-    if target is None or target.status != AccountStatus.ACTIVE.value:
+    if target is None or target.is_bot or target.status != AccountStatus.ACTIVE.value:
         return generic
     relation = await privacy.relation(db, auth.user.id, target.id)
     if relation.friends:

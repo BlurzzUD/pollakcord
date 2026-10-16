@@ -19,7 +19,7 @@ async def grant_role(username: str, role: str) -> int:
     factory = build_session_factory(engine)
     async with factory() as db:
         user = (await db.execute(select(User).where(User.username_lower == username.strip().lower()))).scalar_one_or_none()
-        if user is None:
+        if user is None or user.is_bot:
             print("user not found", file=sys.stderr)
             return 1
         if role == PlatformRole.DOK_REPRESENTATIVE.value and user.school_class_id is None:

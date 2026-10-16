@@ -65,7 +65,12 @@ def install_http_middleware(app: FastAPI, settings: Settings) -> None:
         request_id_var.set(request_id)
         started = time.perf_counter()
         path = request.url.path
-        if request.method not in SAFE_METHODS and path.startswith("/api/") and path not in CSRF_EXEMPT_PATHS:
+        bot_header = request.headers.get("authorization", "").lower().startswith("bot ")
+        bot_api = path.startswith("/api/v1/bots/api/")
+        if bot_header and not bot_api:
+            return _csrf_failure(request, "bot_forbidden")
+        bot_request = bot_header and bot_api and not request.cookies.get(names.session) and not request.headers.get("origin")
+        if request.method not in SAFE_METHODS and path.startswith("/api/") and path not in CSRF_EXEMPT_PATHS and not bot_request:
             if not origin_allowed(request, settings):
                 return _csrf_failure(request, "origin_not_allowed")
             cookie_value = request.cookies.get(names.csrf, "")

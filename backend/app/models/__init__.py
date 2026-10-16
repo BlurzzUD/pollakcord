@@ -1,3 +1,4 @@
+from .bot import BotApplication, BotCommand, BotInstall, BotInteraction
 from .audit import AuditLog, Notification
 from .attachment import Attachment
 from .auth import AuthMethod, AuthSession, RecoveryCode, TotpConfig
@@ -30,6 +31,10 @@ from .social import Block, FriendRequest, Friendship
 from .user import Profile, SchoolClass, Theme, User, UserIdentity, UserSettings
 
 __all__ = [
+    "BotApplication",
+    "BotCommand",
+    "BotInstall",
+    "BotInteraction",
     "Attachment",
     "AuditLog",
     "AuthMethod",

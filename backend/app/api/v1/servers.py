@@ -211,6 +211,9 @@ async def update_server(
             raise AppError("forbidden", 403)
         if not body.owner_id.isdigit() or await db.get(ServerMember, (server_id, int(body.owner_id))) is None:
             raise AppError("not_found", 404)
+        next_owner = await db.get(User, int(body.owner_id))
+        if next_owner is None or next_owner.is_bot:
+            raise AppError("bot_forbidden", 403)
         server.owner_id = int(body.owner_id)
         changed["owner_id"] = server.owner_id
     audit.record(db, AuditAction.SERVER_UPDATE, actor_id=auth.user.id, server_id=server_id, target_type="server", target_id=server_id, details=changed)
@@ -278,12 +281,21 @@ async def delete_server(
     return {"status": "deleted"}
 
 
-async def detach_member(request: Request, db: AsyncSession, outbox: Outbox, server_id: int, user_id: int, reason: str) -> None:
+async def detach_member(request: Request, db: AsyncSession, outbox: Outbox, server_id: int, user_id: int, reason: str, actor_id: int | None = None) -> None:
     from ...realtime.ws import force_leave_voice
 
     channel_ids = await server_service.server_channel_ids(db, server_id)
-    await server_service.remove_member(db, server_id, user_id)
-    await db.commit()
+    from ...models import BotInstall
+    from ...services import bots
+
+    install = await db.get(BotInstall, (server_id, user_id))
+    if install is not None:
+        async with request.app.state.bot_gateway.lock(f"bot:{user_id}"):
+            await bots.remove_install(db, install, actor_id or user_id, outbox)
+            await db.commit()
+    else:
+        await server_service.remove_member(db, server_id, user_id)
+        await db.commit()
     outbox.evict_server(user_id, server_id, channel_ids)
     outbox.topic(f"server:{server_id}", "member.left", {"server_id": sid(server_id), "user_id": sid(user_id)})
     outbox.user(user_id, "server.removed", {"server_id": sid(server_id), "reason": reason})
@@ -400,6 +412,9 @@ async def update_member(
 async def kick_member(server_id: int, user_id: int, request: Request, auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db), outbox: Outbox = Depends(get_outbox)) -> dict[str, str]:
     actor = await require_context(db, server_id, auth.user.id)
     actor.require(Perm.KICK_MEMBERS)
+    candidate = await db.get(User, user_id)
+    if candidate is not None and candidate.is_bot and not actor.is_owner and not actor.can(Perm.ADMINISTRATOR):
+        raise AppError("bot_install_forbidden", 403)
     target = await load_context(db, server_id, user_id)
     if target is None or user_id == auth.user.id:
         raise AppError("not_found", 404)
@@ -407,7 +422,7 @@ async def kick_member(server_id: int, user_id: int, request: Request, auth: Auth
         raise AppError("role_hierarchy", 403)
     audit.record(db, AuditAction.MEMBER_KICK, actor_id=auth.user.id, server_id=server_id, target_type="user", target_id=user_id)
     await notify(db, outbox, user_id, NotificationType.MODERATION, {"kind": "kick", "server_id": sid(server_id), "server_name": actor.server.name})
-    await detach_member(request, db, outbox, server_id, user_id, "kicked")
+    await detach_member(request, db, outbox, server_id, user_id, "kicked", auth.user.id)
     return {"status": "kicked"}
 
 
@@ -426,6 +441,9 @@ async def ban_member(
 ) -> dict[str, str]:
     actor = await require_context(db, server_id, auth.user.id)
     actor.require(Perm.BAN_MEMBERS)
+    candidate = await db.get(User, user_id)
+    if candidate is not None and candidate.is_bot and not actor.is_owner and not actor.can(Perm.ADMINISTRATOR):
+        raise AppError("bot_install_forbidden", 403)
     if user_id == auth.user.id or user_id == actor.server.owner_id or await db.get(User, user_id) is None:
         raise AppError("not_found", 404)
     target = await load_context(db, server_id, user_id)
@@ -436,7 +454,7 @@ async def ban_member(
     audit.record(db, AuditAction.MEMBER_BAN, actor_id=auth.user.id, server_id=server_id, target_type="user", target_id=user_id, details={"reason": body.reason.strip()})
     await notify(db, outbox, user_id, NotificationType.MODERATION, {"kind": "ban", "server_id": sid(server_id), "server_name": actor.server.name})
     if target is not None:
-        await detach_member(request, db, outbox, server_id, user_id, "banned")
+        await detach_member(request, db, outbox, server_id, user_id, "banned", auth.user.id)
     else:
         await db.commit()
         await outbox.flush()

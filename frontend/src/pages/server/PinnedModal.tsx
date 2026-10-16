@@ -1,3 +1,4 @@
+import { BotBadge } from "../../components/BotBadge";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
@@ -18,7 +19,7 @@ export function PinnedModal({ channelId, onClose }: { channelId: string; onClose
         <ul className="list">
           {(pins.data ?? []).map((message) => (
             <li key={message.id} className="pin">
-              <strong>{message.author?.display_name}</strong> <time className="muted">{formatDateTime(message.created_at)}</time>
+              <strong>{message.author?.display_name}</strong> <BotBadge isBot={message.author?.is_bot} /> <time className="muted">{formatDateTime(message.created_at)}</time>
               <p>{message.content}</p>
             </li>
           ))}

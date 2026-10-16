@@ -118,7 +118,22 @@
     "attachment_invalid": "Dieser Anhang ist ungültig, abgelaufen oder gehört zu einem anderen Gespräch.",
     "attachment_limit_reached": "Du kannst bis zu {max} Dateien an eine Nachricht anhängen.",
     "giphy_disabled": "Die GIF-Suche ist derzeit deaktiviert.",
-    "giphy_unavailable": "GIPHY ist momentan nicht erreichbar. Versuche es später erneut."
+    "giphy_unavailable": "GIPHY ist momentan nicht erreichbar. Versuche es später erneut.",
+    "bot_token_invalid": "Der Bot-Token ist ungültig.",
+    "bot_disabled": "Der Bot oder sein Eigentümer ist nicht aktiv.",
+    "bot_forbidden": "Bots können diese Funktion nicht verwenden.",
+    "bot_limit_reached": "Du kannst höchstens {max} Bots besitzen.",
+    "bot_password_required": "Für die Bot-Verwaltung ist ein Passwort erforderlich. Richte es unter Sicherheit ein.",
+    "bot_install_forbidden": "Nur der Servereigentümer oder ein Administrator kann Bots installieren oder entfernen.",
+    "bot_already_installed": "Dieser Bot ist bereits auf dem Server installiert.",
+    "bot_install_limit": "Der Server hat die maximale Mitglieder- oder Rollenanzahl erreicht.",
+    "bot_gateway_limit": "Das Verbindungslimit für das Bot-Gateway wurde erreicht.",
+    "bot_gateway_operation": "Das Bot-Gateway akzeptiert nur Ping-Nachrichten.",
+    "bot_commands_invalid": "Die Bot-Befehle sind ungültig oder doppelt vorhanden.",
+    "bot_options_invalid": "Die Befehlsoptionen sind ungültig oder in diesem Kanal nicht verfügbar.",
+    "bot_offline": "Der Bot ist offline. Sein Eigentümer muss ihn auf dem eigenen Rechner starten.",
+    "bot_interaction_timeout": "Der Bot hat nicht innerhalb von drei Sekunden geantwortet.",
+    "bot_interaction_expired": "Diese Interaktion ist abgelaufen oder wurde bereits beantwortet."
   },
   "server": {
     "category_text": "Textkanäle",

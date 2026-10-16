@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Channel, Message, ServerSummary, UserCard } from "../../api/types";
 import { useUi } from "../../store/ui";
+import { BotBadge } from "../BotBadge";
 import { Avatar } from "../Avatar";
 import { EmptyState } from "../EmptyState";
 import { errorMessage } from "../ErrorText";
@@ -69,7 +70,7 @@ export function SearchDialog({ onClose }: { onClose: () => void }) {
             {data.friends.map((user) => (
               <li key={user.id}>
                 <button type="button" className="list__item" onClick={() => { onClose(); openProfile(user.id); }}>
-                  <Avatar name={user.display_name} url={user.avatar_url} size={28} /> {user.display_name} <span className="muted">@{user.username}</span>
+                  <Avatar name={user.display_name} url={user.avatar_url} size={28} /> {user.display_name} <BotBadge isBot={user.is_bot} /> <span className="muted">@{user.username}</span>
                 </button>
               </li>
             ))}
@@ -83,9 +84,9 @@ export function SearchDialog({ onClose }: { onClose: () => void }) {
             {data.users.map((user) => (
               <li key={user.id} className="list__row">
                 <button type="button" className="list__item" onClick={() => { onClose(); openProfile(user.id); }}>
-                  <Avatar name={user.display_name} url={user.avatar_url} size={28} /> {user.display_name} <span className="muted">@{user.username}</span>
+                  <Avatar name={user.display_name} url={user.avatar_url} size={28} /> {user.display_name} <BotBadge isBot={user.is_bot} /> <span className="muted">@{user.username}</span>
                 </button>
-                <button type="button" className="button button--small" onClick={() => addFriend.mutate(user.username)}>
+                <button type="button" className="button button--small" disabled={user.is_bot} onClick={() => addFriend.mutate(user.username)}>
                   {t("friends.add")}
                 </button>
               </li>
@@ -134,7 +135,7 @@ export function SearchDialog({ onClose }: { onClose: () => void }) {
                   onClick={() => go(where.conversation_id ? `/app/dm/${where.conversation_id}` : `/app/server/${where.server_id}/${where.channel_id}`)}
                 >
                   <span className="muted">
-                    {where.conversation_id ? where.user?.display_name : `${where.server_name} · #${where.channel_name}`} — {message.author?.display_name}
+                    {where.conversation_id ? where.user?.display_name : `${where.server_name} · #${where.channel_name}`} — {message.author?.display_name} <BotBadge isBot={message.author?.is_bot} />
                   </span>
                   <span>{message.content}</span>
                 </button>

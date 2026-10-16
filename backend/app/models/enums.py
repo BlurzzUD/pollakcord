@@ -145,6 +145,11 @@ class NotificationType(StrEnum):
 
 
 class AuditAction(StrEnum):
+    BOT_CREATE = "bot.create"
+    BOT_TOKEN_REGENERATE = "bot.token_regenerate"
+    BOT_DELETE = "bot.delete"
+    BOT_INSTALL = "bot.install"
+    BOT_REMOVE = "bot.remove"
     MEMBER_KICK = "member.kick"
     MEMBER_BAN = "member.ban"
     MEMBER_UNBAN = "member.unban"

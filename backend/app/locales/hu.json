@@ -118,7 +118,22 @@
     "attachment_invalid": "Ez a melléklet érvénytelen, lejárt vagy nem ehhez a beszélgetéshez tartozik.",
     "attachment_limit_reached": "Egy üzenethez legfeljebb {max} fájlt csatolhatsz.",
     "giphy_disabled": "A GIF-keresés jelenleg nincs engedélyezve.",
-    "giphy_unavailable": "A GIPHY most nem érhető el. Próbáld újra később."
+    "giphy_unavailable": "A GIPHY most nem érhető el. Próbáld újra később.",
+    "bot_token_invalid": "Érvénytelen bottoken.",
+    "bot_disabled": "A bot vagy tulajdonosa jelenleg nem aktív.",
+    "bot_forbidden": "Botok nem használhatják ezt a funkciót.",
+    "bot_limit_reached": "Legfeljebb {max} botod lehet.",
+    "bot_password_required": "A bot kezeléséhez jelszavas fiókvédelem szükséges. Állítsd be a Biztonság lapon.",
+    "bot_install_forbidden": "Botot csak a szerver tulajdonosa vagy adminisztrátora telepíthet vagy távolíthat el.",
+    "bot_already_installed": "Ez a bot már a szerver tagja.",
+    "bot_install_limit": "A szerver elérte a tagok vagy szerepkörök számának korlátját.",
+    "bot_gateway_limit": "Elérted a botkapcsolatok korlátját.",
+    "bot_gateway_operation": "A botkapcsolat csak ping műveletet fogad.",
+    "bot_commands_invalid": "Érvénytelen vagy ismétlődő botparancs.",
+    "bot_options_invalid": "A parancs paraméterei érvénytelenek vagy nem elérhetők ebben a csatornában.",
+    "bot_offline": "A bot nem csatlakozik. A tulajdonosának el kell indítania a saját gépén.",
+    "bot_interaction_timeout": "A bot nem válaszolt három másodpercen belül.",
+    "bot_interaction_expired": "Ez a parancskérés lejárt, vagy már megválaszolták."
   },
   "server": {
     "category_text": "Szöveges csatornák",

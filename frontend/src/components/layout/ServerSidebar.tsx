@@ -54,7 +54,7 @@ export function ServerSidebar({ serverId }: { serverId: string }) {
   members.data?.members.forEach((member) => {
     names[member.user.id] = member.nickname ?? member.user.display_name;
   });
-  const canManage = detail.is_owner || can(detail.my_permissions, "manage_server") || can(detail.my_permissions, "manage_channels") || can(detail.my_permissions, "manage_roles") || can(detail.my_permissions, "kick_members") || can(detail.my_permissions, "ban_members") || can(detail.my_permissions, "view_audit_log") || can(detail.my_permissions, "manage_messages");
+  const canManage = detail.is_owner || can(detail.my_permissions, "administrator") || can(detail.my_permissions, "manage_server") || can(detail.my_permissions, "manage_channels") || can(detail.my_permissions, "manage_roles") || can(detail.my_permissions, "kick_members") || can(detail.my_permissions, "ban_members") || can(detail.my_permissions, "view_audit_log") || can(detail.my_permissions, "manage_messages");
   const canInvite = can(detail.my_permissions, "create_invite");
 
   const renderChannel = (channel: Channel) => {

@@ -147,6 +147,9 @@ async def set_user_status(user_id: int, body: StatusBody, request: Request, auth
     await db.commit()
     if body.status == "suspended":
         await request.app.state.hub.close_user(user.id)
+        await request.app.state.bot_gateway.close_owner(user.id)
+        if user.is_bot:
+            await request.app.state.bot_gateway.close_bot(user.id)
     return {"status": user.status}
 
 

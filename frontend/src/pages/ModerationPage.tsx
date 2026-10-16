@@ -1,3 +1,4 @@
+import { BotBadge } from "../components/BotBadge";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -124,7 +125,7 @@ function ReportsTab() {
             <ol className="report__context">
               {(detail.data.context ?? []).map((item) => (
                 <li key={item.id} className={item.reported ? "is-reported" : ""}>
-                  <strong>{item.author?.display_name}</strong> {item.deleted ? <em>{t("message.deleted")}</em> : item.content}
+                  <strong>{item.author?.display_name}</strong> <BotBadge isBot={item.author?.is_bot} /> {item.deleted ? <em>{t("message.deleted")}</em> : item.content}
                 </li>
               ))}
             </ol>
@@ -197,13 +198,13 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
           <li key={user.id}>
             <span className="people__main">
               <span>
-                <strong>{user.display_name}</strong>
+                <strong>{user.display_name}</strong> <BotBadge isBot={user.is_bot} />
                 <span className="muted">
                   @{user.username} · {user.status} · {user.id}
                 </span>
               </span>
             </span>
-            <button type="button" className="button button--small" onClick={() => setReveal(user)}>
+            <button type="button" className="button button--small" disabled={user.is_bot} onClick={() => setReveal(user)}>
               {t("moderation.reveal")}
             </button>
             {isAdmin && !isStaffRole(user.platform_role) ? (
@@ -255,7 +256,7 @@ function MessagesTab() {
         <ol className="report__context">
           {lookup.data.context.map((item) => (
             <li key={item.id} className={item.reported ? "is-reported" : ""}>
-              <strong>{item.author?.display_name}</strong> {item.deleted ? <em>{t("message.deleted")}</em> : item.content}
+              <strong>{item.author?.display_name}</strong> <BotBadge isBot={item.author?.is_bot} /> {item.deleted ? <em>{t("message.deleted")}</em> : item.content}
             </li>
           ))}
         </ol>

@@ -42,6 +42,8 @@ def session_cookie_name(request: Request) -> str:
 
 
 async def optional_auth(request: Request, db: AsyncSession = Depends(get_db)) -> Auth | None:
+    if request.headers.get("authorization", "").lower().startswith("bot "):
+        raise AppError("bot_forbidden", 403)
     token = request.cookies.get(session_cookie_name(request))
     if not token:
         return None
@@ -49,6 +51,8 @@ async def optional_auth(request: Request, db: AsyncSession = Depends(get_db)) ->
     if loaded is None:
         return None
     record, user = loaded
+    if user.is_bot:
+        raise AppError("bot_forbidden", 403)
     return Auth(user=user, session=record)
 
 

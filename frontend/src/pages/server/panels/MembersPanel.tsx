@@ -1,3 +1,4 @@
+import { BotBadge } from "../../../components/BotBadge";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,7 +53,7 @@ export function MembersPanel({ server }: { server: ServerDetail }) {
             <span className="people__main">
               <Avatar name={member.user.display_name} url={member.user.avatar_url} size={36} />
               <span>
-                <strong>{member.nickname ?? member.user.display_name}</strong>
+                <strong>{member.nickname ?? member.user.display_name}</strong> <BotBadge isBot={member.user.is_bot} />
                 <span className="muted">
                   @{member.user.username}
                   {member.is_owner ? ` · ${t("server.owner")}` : ""}

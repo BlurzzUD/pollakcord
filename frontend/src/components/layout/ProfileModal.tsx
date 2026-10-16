@@ -8,6 +8,7 @@ import { useAuth } from "../../store/auth";
 import { useLive } from "../../store/live";
 import { useUi } from "../../store/ui";
 import { formatDate, formatRelative } from "../../utils/format";
+import { BotBadge } from "../BotBadge";
 import { Avatar } from "../Avatar";
 import { CopyId } from "../CopyId";
 import { errorMessage } from "../ErrorText";
@@ -64,7 +65,7 @@ function ProfileContent({ userId, onClose }: { userId: string; onClose: () => vo
             <Avatar name={data.display_name} url={data.avatar_url} size={84} presence={presence} />
             <div>
               <h3>
-                {data.display_name} {data.staff ? <span className="badge">{t("common.staff")}</span> : null}
+                {data.display_name} <BotBadge isBot={data.is_bot} /> {data.staff ? <span className="badge">{t("common.staff")}</span> : null}
               </h3>
               <p className="muted">@{data.username}</p>
             </div>
@@ -113,7 +114,7 @@ function ProfileContent({ userId, onClose }: { userId: string; onClose: () => vo
             </section>
           ) : null}
           <CopyId value={data.id} label={t("developer.user_id")} />
-          {!own && relation ? (
+          {!own && relation && !data.is_bot ? (
             <div className="profile__actions">
               <button type="button" className="button button--primary" onClick={() => message.mutate()} disabled={relation.blocked}>
                 {t("profile.send_message")}

@@ -15,6 +15,7 @@ from .integrations.kreta.adapter import KretaAuthPort, KretaScriptAdapter
 from .integrations.kreta.flows import KretaFlowStore
 from .logging_config import configure_logging, get_logger
 from .realtime.hub import Hub
+from .realtime.bots import BotGateway
 from .realtime.voice import VoiceManager
 from .security.middleware import install_http_middleware
 from .security.passwords import PasswordService
@@ -67,6 +68,8 @@ def create_app(settings: Settings | None = None, kreta_adapter: KretaAuthPort | 
         app.state.passwords = PasswordService(settings)
         app.state.limiter = RateLimiter(settings.rate_limit_enabled)
         app.state.hub = hub
+        app.state.bot_gateway = BotGateway(app)
+        hub.bot_listener = app.state.bot_gateway.publish
         app.state.voice = VoiceManager(settings.voice_max_participants)
         embeds = EmbedService(settings)
         app.state.messages = MessageService(vault, settings, embeds)
@@ -81,6 +84,7 @@ def create_app(settings: Settings | None = None, kreta_adapter: KretaAuthPort | 
         yield
         from .realtime.ws import shutdown_realtime
 
+        await app.state.bot_gateway.shutdown()
         await shutdown_realtime(app)
         await flows.shutdown()
         await engine.dispose()

@@ -29,7 +29,7 @@ SNAPSHOT_AFTER = 2
 
 
 async def active_class(db: AsyncSession, user: User) -> SchoolClass | None:
-    if user.school_class_id is None:
+    if user.is_bot or user.school_class_id is None:
         return None
     school_class = await db.get(SchoolClass, user.school_class_id)
     return school_class if school_class is not None and school_class.is_active else None

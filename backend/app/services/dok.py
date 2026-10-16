@@ -143,7 +143,7 @@ class DokService:
 
     @staticmethod
     async def recipient_ids(db: AsyncSession, thread: DokThread) -> list[int]:
-        statement = select(User.id).where(User.status == AccountStatus.ACTIVE.value)
+        statement = select(User.id).where(User.status == AccountStatus.ACTIVE.value, User.is_bot.is_(False))
         if thread.scope == DokScope.CLASS.value:
             statement = statement.where(User.school_class_id == thread.school_class_id)
         else:

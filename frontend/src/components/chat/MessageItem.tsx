@@ -6,6 +6,7 @@ import { useAuth } from "../../store/auth";
 import { useUi } from "../../store/ui";
 import { formatDateTime, formatTime } from "../../utils/format";
 import { Avatar } from "../Avatar";
+import { BotBadge } from "../BotBadge";
 import { CopyId } from "../CopyId";
 import { Icon } from "../Icon";
 import { RichText } from "./RichText";
@@ -76,12 +77,14 @@ export function MessageItem(props: MessageItemProps) {
               <button type="button" className="message__author" onClick={() => author && openProfile(author.id)}>
                 {displayName}
               </button>
+              <BotBadge isBot={author?.is_bot} />
               {author?.staff ? <span className="badge">{t("common.staff")}</span> : null}
               <time dateTime={message.created_at}>{formatTime(message.created_at)}</time>
               {message.pinned ? <Icon name="pin" size={14} label={t("message.pinned")} /> : null}
               {author ? <CopyId value={message.id} label={t("developer.message_id")} /> : null}
             </header>
           )}
+          {compact ? <BotBadge isBot={author?.is_bot} /> : null}
           <div className="message__content">
             <RichText content={message.content ?? ""} names={names} />
           </div>

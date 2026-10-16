@@ -25,7 +25,8 @@ def user_card(user: User, profile: Profile | None) -> dict[str, Any]:
         "username": user.username,
         "display_name": user.display_name,
         "avatar_url": media_url("avatar", profile.avatar_key if profile else None),
-        "staff": user.platform_role in STAFF_ROLES,
+        "staff": not user.is_bot and user.platform_role in STAFF_ROLES,
+        "is_bot": bool(user.is_bot),
     }
 
 

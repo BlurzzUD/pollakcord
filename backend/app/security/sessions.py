@@ -80,6 +80,8 @@ async def load_session(db: AsyncSession, token: str, settings: Settings) -> tupl
     if row is None:
         return None
     record, user = row
+    if user.is_bot:
+        return None
     now = utcnow()
     if record.revoked_at is not None or record.expires_at <= now:
         return None

@@ -90,6 +90,8 @@ class ServerContext:
     member_role_ids: set[int]
     overwrites: list[PermissionOverwrite] = field(default_factory=list)
 
+    bot_permissions: int | None = None
+
     @property
     def user_id(self) -> int:
         return self.member.user_id
@@ -112,8 +114,10 @@ class ServerContext:
             if role is not None:
                 bits |= role.permissions
         default = self.default_role
-        if default is not None:
+        if default is not None and self.bot_permissions is None:
             bits |= default.permissions
+        if self.bot_permissions is not None:
+            return bits & self.bot_permissions
         if bits & Perm.ADMINISTRATOR:
             return ALL_PERMISSIONS
         return bits
@@ -164,6 +168,8 @@ class ServerContext:
             for overwrite in relevant:
                 if overwrite.target_type == OverwriteTarget.MEMBER.value and overwrite.target_id == self.user_id:
                     perms = (perms & ~overwrite.deny) | overwrite.allow
+        if self.bot_permissions is not None:
+            perms &= self.bot_permissions
         if not perms & Perm.VIEW_CHANNEL:
             return 0
         if self.member.timeout_until is not None and self.member.timeout_until > utcnow():
@@ -196,7 +202,14 @@ async def load_context(db: AsyncSession, server_id: int, user_id: int) -> Server
         (await db.execute(select(MemberRole.role_id).where(MemberRole.server_id == server_id, MemberRole.user_id == user_id))).scalars()
     )
     overwrites = list((await db.execute(select(PermissionOverwrite).where(PermissionOverwrite.server_id == server_id))).scalars())
-    return ServerContext(server, member, roles, member_role_ids, overwrites)
+    from ..models import BotInstall, User
+
+    user = await db.get(User, user_id)
+    cap = None
+    if user is not None and user.is_bot:
+        install = await db.get(BotInstall, (server_id, user_id))
+        cap = install.permissions if install else 0
+    return ServerContext(server, member, roles, member_role_ids, overwrites, cap)
 
 
 async def require_context(db: AsyncSession, server_id: int, user_id: int) -> ServerContext:

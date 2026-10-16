@@ -272,7 +272,7 @@ class FormService:
 
     @staticmethod
     async def audience_ids(db: AsyncSession, form: Form) -> list[int]:
-        statement = select(User.id).where(User.status == AccountStatus.ACTIVE.value)
+        statement = select(User.id).where(User.status == AccountStatus.ACTIVE.value, User.is_bot.is_(False))
         if form.target_scope == FormScope.CLASS.value:
             statement = statement.where(User.school_class_id == form.school_class_id)
         else:

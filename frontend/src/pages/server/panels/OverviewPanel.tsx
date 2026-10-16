@@ -101,7 +101,7 @@ export function OverviewPanel({ server }: { server: ServerDetail }) {
             hint={t("server.transfer_hint")}
             value={newOwner}
             onChange={(event) => setNewOwner(event.target.value)}
-            options={[{ value: "", label: t("server.choose_member") }, ...(members.data?.members ?? []).filter((m) => !m.is_owner).map((m) => ({ value: m.user.id, label: m.nickname ?? m.user.display_name }))]}
+            options={[{ value: "", label: t("server.choose_member") }, ...(members.data?.members ?? []).filter((m) => !m.is_owner && !m.user.is_bot).map((m) => ({ value: m.user.id, label: m.nickname ?? m.user.display_name }))]}
           />
           <button type="button" className="button button--danger-ghost" disabled={!newOwner || transfer.isPending} onClick={() => transfer.mutate()}>
             {t("server.transfer")}

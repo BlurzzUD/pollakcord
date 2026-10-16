@@ -79,7 +79,7 @@ async def open_conversation(body: OpenBody, request: Request, auth: Auth = Depen
     if target_id == auth.user.id:
         raise AppError("cannot_message_self", 422)
     target = await db.get(User, target_id)
-    if target is None or target.status != AccountStatus.ACTIVE.value:
+    if target is None or target.is_bot or target.status != AccountStatus.ACTIVE.value:
         raise AppError("not_found", 404)
     low, high = ordered(auth.user.id, target.id)
     conversation = (await db.execute(select(Conversation).where(Conversation.user_low_id == low, Conversation.user_high_id == high))).scalar_one_or_none()

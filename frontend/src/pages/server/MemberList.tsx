@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import type { Member, Role, ServerDetail } from "../../api/types";
+import { BotBadge } from "../../components/BotBadge";
 import { Avatar } from "../../components/Avatar";
 import { useLive } from "../../store/live";
 import { useUi } from "../../store/ui";
@@ -50,7 +51,7 @@ export function MemberList({ server, members }: { server: ServerDetail; members:
                   <button type="button" className={`member${status(member) === "online" ? "" : " is-offline"}`} onClick={() => openProfile(member.user.id)}>
                     <Avatar name={member.nickname ?? member.user.display_name} url={member.user.avatar_url} size={32} presence={status(member)} />
                     <span className="member__name" style={group.color ? { color: group.color } : undefined}>
-                      {member.nickname ?? member.user.display_name}
+                      {member.nickname ?? member.user.display_name} <BotBadge isBot={member.user.is_bot} />
                     </span>
                     {member.timeout_until ? <span className="badge">{t("server.timed_out")}</span> : null}
                   </button>

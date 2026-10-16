@@ -332,7 +332,7 @@ async def login(body: LoginBody, request: Request, response: Response, db: Async
     passwords = request.app.state.passwords
     user = (await db.execute(select(User).where(User.username_lower == username))).scalar_one_or_none()
     method = await db.get(AuthMethod, user.id) if user else None
-    if user is None or method is None:
+    if user is None or user.is_bot or method is None:
         await passwords.burn(body.secret)
         raise AppError("invalid_credentials", 401)
     now = utcnow()

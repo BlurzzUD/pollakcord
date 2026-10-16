@@ -1,3 +1,4 @@
+import { BotBadge } from "./BotBadge";
 import { useTranslation } from "react-i18next";
 
 import type { AuditEntry } from "../api/types";
@@ -29,9 +30,9 @@ export function AuditList({ entries }: { entries: AuditEntry[] }) {
             <td>
               <time dateTime={entry.created_at}>{formatDateTime(entry.created_at)}</time>
             </td>
-            <td>{entry.actor?.display_name ?? "—"}</td>
+            <td>{entry.actor?.display_name ?? "—"} <BotBadge isBot={entry.actor?.is_bot} /></td>
             <td>{t(`audit.actions.${entry.action.replace(".", "_")}`, { defaultValue: entry.action })}</td>
-            <td>{entry.target_user ? entry.target_user.display_name : (entry.target_type ?? "—")}</td>
+            <td>{entry.target_user ? <>{entry.target_user.display_name} <BotBadge isBot={entry.target_user.is_bot} /></> : (entry.target_type ?? "—")}</td>
             <td className="muted">{summarize(entry.details)}</td>
           </tr>
         ))}

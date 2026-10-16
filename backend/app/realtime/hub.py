@@ -25,6 +25,7 @@ class Hub:
     def __init__(self) -> None:
         self._by_user: dict[int, set[Connection]] = {}
         self._topics: dict[str, set[Connection]] = {}
+        self.bot_listener: Callable[[str, str, dict[str, Any]], Awaitable[None]] | None = None
         self.revalidator: Callable[[int], Awaitable[None]] | None = None
 
     def connections_of(self, user_id: int) -> set[Connection]:
@@ -111,6 +112,11 @@ class Hub:
         text = self.encode(event, data)
         targets = [c for c in list(self._topics.get(topic, ())) if c.user_id != exclude_user]
         await asyncio.gather(*(self._deliver(c, text) for c in targets))
+        if self.bot_listener is not None:
+            try:
+                await self.bot_listener(topic, event, data)
+            except Exception as error:
+                logger.error("bot_delivery_failed", extra={"error_type": type(error).__name__})
 
     async def evict_user_from_server(self, user_id: int, server_id: int, channel_ids: list[int]) -> None:
         self.unsubscribe_user(user_id, f"server:{server_id}")

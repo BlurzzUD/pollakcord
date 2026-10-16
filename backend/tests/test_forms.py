@@ -379,7 +379,8 @@ def test_results_aggregate_choices_and_identify_respondents_by_platform_name(mak
     assert summary[short["id"]]["answered"] == 1 and summary[short["id"]]["options"] == [] and summary[long_text["id"]]["answered"] == 3
     by_user = {response["user"]["username"]: response for response in results["responses"]}
     assert set(by_user) == {"mate_anna", "out_bence", "rep_eva"}
-    assert all(set(response["user"]) == {"id", "username", "display_name", "avatar_url", "staff"} for response in results["responses"])
+    assert all(set(response["user"]) == {"id", "username", "display_name", "avatar_url", "staff", "is_bot"} for response in results["responses"])
+    assert all(response["user"]["is_bot"] is False for response in results["responses"])
     assert by_user["mate_anna"]["user"]["display_name"] == "Mate_Anna" and by_user["mate_anna"]["user"]["id"] == mate.uid
     assert by_user["mate_anna"]["answers"][single["id"]] == {"options": [korán]}
     assert by_user["mate_anna"]["answers"][multiple["id"]] == {"options": [tészta, saláta]}

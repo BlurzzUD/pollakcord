@@ -118,7 +118,22 @@
     "attachment_invalid": "This attachment is invalid, expired, or belongs to a different conversation.",
     "attachment_limit_reached": "You can attach up to {max} files to a message.",
     "giphy_disabled": "GIF search is currently disabled.",
-    "giphy_unavailable": "GIPHY is unavailable. Please try again later."
+    "giphy_unavailable": "GIPHY is unavailable. Please try again later.",
+    "bot_token_invalid": "The bot token is invalid.",
+    "bot_disabled": "The bot or its owner is inactive.",
+    "bot_forbidden": "Bots cannot use this feature.",
+    "bot_limit_reached": "You can own at most {max} bots.",
+    "bot_password_required": "Managing bots requires password security. Set it up in Security settings.",
+    "bot_install_forbidden": "Only the server owner or an Administrator can install or remove bots.",
+    "bot_already_installed": "This bot is already installed in the server.",
+    "bot_install_limit": "The server has reached its member or role limit.",
+    "bot_gateway_limit": "The bot gateway connection limit has been reached.",
+    "bot_gateway_operation": "The bot gateway only accepts ping frames.",
+    "bot_commands_invalid": "The bot command definitions are invalid or duplicated.",
+    "bot_options_invalid": "The command options are invalid or unavailable in this channel.",
+    "bot_offline": "The bot is offline. Its owner must run it on their own machine.",
+    "bot_interaction_timeout": "The bot did not respond within three seconds.",
+    "bot_interaction_expired": "This interaction has expired or already has a response."
   },
   "server": {
     "category_text": "Text channels",
