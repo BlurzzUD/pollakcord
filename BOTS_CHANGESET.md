@@ -1,4 +1,6 @@
-# User-hosted bots changeset
+# Initial user-hosted bots changeset (0006)
+
+This document records the original 0006 implementation and its validation. The 0.2 release supersedes its own-message-only, management-endpoint, gateway-event and SDK-reconnect descriptions; see [BOTS_V02_CHANGESET.md](BOTS_V02_CHANGESET.md) for the current update.
 
 ## File and API plan
 

@@ -79,6 +79,12 @@ export function useTimeline(scope: Scope, id: Id, onRead: () => void) {
     onRead();
   });
 
+  useRealtimeEvent<Message>("message.update", (message) => {
+    if (belongs(message)) {
+      setMessages((current) => current.map((item) => item.id === message.id && !item.deleted ? { ...item, content: message.content, edited_at: message.edited_at, embeds: message.embeds } : item));
+    }
+  });
+
   useRealtimeEvent<{ id: Id; channel_id?: Id; conversation_id?: Id }>("message.delete", (event) => {
     if (!belongs(event)) {
       return;

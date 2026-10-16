@@ -585,6 +585,7 @@
     "new_messages": "Neue Nachrichten",
     "pin": "Anheften",
     "pinned": "Angeheftete Nachricht",
+    "edited": "(bearbeitet)",
     "reaction_label_one": "Reaktion {{emoji}}, {{count}} Person",
     "reaction_label_other": "Reaktion {{emoji}}, {{count}} Personen",
     "reply": "Antworten",

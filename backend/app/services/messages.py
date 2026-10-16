@@ -229,6 +229,7 @@ class MessageService:
                     "content": None if deleted else texts.get(message.id, ""),
                     "deleted": deleted,
                     "created_at": iso(message.created_at),
+                    "edited_at": iso(message.edited_at),
                     "reply_to": previews.get(message.reply_to_id) if message.reply_to_id else None,
                     "pinned": message.pinned_at is not None,
                     "reactions": [] if deleted else reactions.get(message.id, []),
@@ -237,6 +238,25 @@ class MessageService:
                 }
             )
         return result
+
+    async def edit_text(self, db: AsyncSession, message: Message, scope: MessageScope, content: str, mentions: set[int]) -> None:
+        text = clean_content(content, self._max_length)
+        row = await db.get(MessageContent, message.id)
+        if row is None or message.deleted_at is not None:
+            raise AppError("not_found", 404)
+        embeds = await self._embeds.build(text)
+        raw = await self._key_by_id(db, row.data_key_id)
+        row.ciphertext = seal(raw, text.encode("utf-8"), self._message_aad(message.id, scope.kind.value, scope.scope_id, message.author_id))
+        previous = open_media(self._vault, f"chat|{scope.kind.value}|{scope.scope_id}", message.id, message.media_enc, message.media_key_id)
+        message.media_enc, message.media_key_id = seal_media(self._vault, f"chat|{scope.kind.value}|{scope.scope_id}", message.id, embeds, previous.get("giphy_id"))
+        message.edited_at = utcnow()
+        await db.execute(delete(SearchToken).where(SearchToken.message_id == message.id))
+        await db.execute(delete(Mention).where(Mention.message_id == message.id))
+        for digest in self.search_hashes(scope, tokenize(text)):
+            db.add(SearchToken(message_id=message.id, token_hash=digest))
+        for user_id in mentions:
+            db.add(Mention(message_id=message.id, user_id=user_id))
+        await db.flush()
 
     async def _authors(self, db: AsyncSession, author_ids: set[int], server_id: int | None) -> dict[int, dict[str, Any]]:
         if not author_ids:

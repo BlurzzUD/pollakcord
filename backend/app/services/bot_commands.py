@@ -51,6 +51,10 @@ class BotMessageBody(StrictBody):
     content: str = Field(min_length=1, max_length=8000)
 
 
+class BotSendBody(BotMessageBody):
+    reply_to_id: str | None = Field(default=None, pattern=r"^[0-9]{1,19}$")
+
+
 def command_payload(command: BotCommand, card: dict | None = None) -> dict:
     return {"id": sid(command.id), "bot_id": sid(command.bot_user_id), "name": command.name, "description": command.description, "options": command.options, "default_member_permissions": command.default_member_permissions, **({"bot": card} if card else {})}
 
@@ -154,7 +158,11 @@ async def invoke(db: AsyncSession, request: Request, channel_id: int, human_id: 
     manager.pending_bots[interaction_id] = command.bot_user_id
     try:
         await db.commit()
-        event = {"id": sid(interaction_id), "command_id": sid(command.id), "name": command.name, "options": options, "channel_id": sid(channel_id), "server_id": sid(channel.server_id), "user": {"id": sid(human_id)}, "expires_at": interaction.expires_at.isoformat()}
+        from .bot_resources import member_payload
+
+        member = await member_payload(db, channel.server_id, human_id)
+        human = await load_context(db, channel.server_id, human_id)
+        event = {"id": sid(interaction_id), "command_id": sid(command.id), "name": command.name, "options": options, "channel_id": sid(channel_id), "server_id": sid(channel.server_id), "user": member["user"], "member": member, "permissions": human.channel_permissions(channel), "expires_at": interaction.expires_at.isoformat()}
         if not await manager.interaction(command.bot_user_id, channel_id, event):
             await db.execute(update(BotInteraction).where(BotInteraction.id == interaction_id, BotInteraction.status == "pending").values(status="expired"))
             await db.commit()
@@ -186,7 +194,7 @@ async def invoke(db: AsyncSession, request: Request, channel_id: int, human_id: 
             future.cancel()
 
 
-async def send_bot_message(db: AsyncSession, request: Request, auth: BotAuth, channel_id: int, content: str, outbox: Outbox) -> dict:
+async def send_bot_message(db: AsyncSession, request: Request, auth: BotAuth, channel_id: int, content: str, outbox: Outbox, *, reply_to_id: str | None = None) -> dict:
     from ..api.v1.channels import enforce_slowmode, mention_targets, text_scope
 
     channel, context = await load_channel_context(db, channel_id, auth.user.id)
@@ -200,7 +208,9 @@ async def send_bot_message(db: AsyncSession, request: Request, auth: BotAuth, ch
         await enforce_slowmode(db, channel, auth.user.id)
     targets = await mention_targets(db, context, channel, content, auth.user.id)
     service = request.app.state.messages
-    message, _ = await service.send(db, scope, auth.user.id, content, reply_to_id=None, mentions=targets)
+    if reply_to_id is not None and not 0 < int(reply_to_id) < 2**63:
+        raise AppError("validation_error", 422)
+    message, _ = await service.send(db, scope, auth.user.id, content, reply_to_id=int(reply_to_id) if reply_to_id else None, mentions=targets)
     payload = (await service.payloads(db, [message], auth.user.id, scope))[0]
     outbox.topic(f"channel:{channel_id}", "message.create", payload)
     outbox.topic(f"server:{channel.server_id}", "channel.activity", {"server_id": sid(channel.server_id), "channel_id": sid(channel_id), "message_id": sid(message.id), "author_id": sid(auth.user.id)})

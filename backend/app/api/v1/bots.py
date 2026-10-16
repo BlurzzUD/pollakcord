@@ -13,7 +13,7 @@ from ...realtime.outbox import Outbox
 from ...security.bots import BotAuth, bot_rate, require_bot
 from ...security.ratelimit import enforce
 from ...services import accounts, audit, bot_commands, bots, uploads
-from ...services.bot_commands import BotMessageBody, InvokeBody, RegisterBody, StrictBody
+from ...services.bot_commands import BotMessageBody, BotSendBody, InvokeBody, RegisterBody, StrictBody
 from ...services.permissions import Perm, bits_to_names, load_channel_context, load_context
 from ...services.serializers import channel_dict, sid, user_card
 from ..deps import Auth, get_db, get_outbox, require_auth
@@ -203,7 +203,7 @@ async def invoke_command(channel_id: IdPath, body: InvokeBody, request: Request,
 
 @router.get("/bots/api/me")
 async def current(auth: BotAuth = Depends(require_bot), db: AsyncSession = Depends(get_db)) -> dict:
-    return {"user": user_card(auth.user, await db.get(Profile, auth.user.id)), "bot_id": sid(auth.user.id)}
+    return {"user": user_card(auth.user, await db.get(Profile, auth.user.id)), "bot_id": sid(auth.user.id), "owner_id": sid(auth.owner.id)}
 
 
 @router.get("/bots/api/servers")
@@ -225,14 +225,14 @@ async def channels(server_id: IdPath, auth: BotAuth = Depends(require_bot), db: 
     if context is None or await db.get(BotInstall, (server_id, auth.user.id)) is None:
         raise AppError("not_found", 404)
     rows = (await db.execute(select(Channel).where(Channel.server_id == server_id, Channel.type == "text").order_by(Channel.position))).scalars()
-    return [channel_dict(channel) for channel in rows if context.visible_channel(channel)]
+    return [{**channel_dict(channel), "my_permissions": context.channel_permissions(channel)} for channel in rows if context.visible_channel(channel)]
 
 
 @router.post("/bots/api/channels/{channel_id}/messages")
-async def send(channel_id: IdPath, body: BotMessageBody, request: Request, auth: BotAuth = Depends(require_bot), db: AsyncSession = Depends(get_db), outbox: Outbox = Depends(get_outbox)) -> dict:
+async def send(channel_id: IdPath, body: BotSendBody, request: Request, auth: BotAuth = Depends(require_bot), db: AsyncSession = Depends(get_db), outbox: Outbox = Depends(get_outbox)) -> dict:
     bot_rate(request, auth, "send", 8, 10, 16)
     async with request.app.state.bot_gateway.lock(f"send:{auth.user.id}:{channel_id}"):
-        payload = await bot_commands.send_bot_message(db, request, auth, channel_id, body.content, outbox)
+        payload = await bot_commands.send_bot_message(db, request, auth, channel_id, body.content, outbox, reply_to_id=body.reply_to_id)
         await db.commit()
         await outbox.flush()
     return payload
@@ -244,8 +244,17 @@ async def delete_message(channel_id: IdPath, message_id: IdPath, request: Reques
     channel, context = await load_channel_context(db, channel_id, auth.user.id)
     context.require_in(channel, Perm.SEND_MESSAGES)
     message = await db.get(Message, message_id)
-    if channel.type != "text" or message is None or message.channel_id != channel_id or message.author_id != auth.user.id:
+    if channel.type != "text" or message is None or message.channel_id != channel_id:
         raise AppError("not_found", 404)
+    if message.author_id != auth.user.id:
+        if not context.can_in(channel, Perm.MANAGE_MESSAGES):
+            raise AppError("not_found", 404)
+        from ...services.bot_resources import moderation_target
+        from .channels import delete_message as remove_message
+
+        if message.author_id is not None:
+            await moderation_target(db, auth, channel.server_id, message.author_id)
+        return await remove_message(channel_id, message_id, request, auth, db, outbox)
     if message.deleted_at is None:
         await request.app.state.messages.delete(db, message)
     await db.commit()

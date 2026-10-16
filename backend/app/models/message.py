@@ -64,6 +64,7 @@ class Message(Base):
     reply_to_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = created_column()
     deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     pinned_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     pinned_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     media_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

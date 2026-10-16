@@ -585,6 +585,7 @@
     "new_messages": "Új üzenetek",
     "pin": "Kitűzés",
     "pinned": "Kitűzött üzenet",
+    "edited": "(szerkesztve)",
     "reaction_label_one": "{{emoji}} reakció, {{count}} személytől",
     "reaction_label_other": "{{emoji}} reakció, {{count}} személytől",
     "reply": "Válasz",

@@ -126,6 +126,7 @@ export interface Message {
   deleted: boolean;
   created_at: string;
   reply_to: ReplyPreview | null;
+  edited_at?: string | null;
   pinned: boolean;
   reactions: Reaction[];
   attachments?: Attachment[];

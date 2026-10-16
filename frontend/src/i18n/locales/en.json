@@ -585,6 +585,7 @@
     "new_messages": "New messages",
     "pin": "Pin",
     "pinned": "Pinned message",
+    "edited": "(edited)",
     "reaction_label_one": "{{emoji}} reaction, {{count}} person",
     "reaction_label_other": "{{emoji}} reaction, {{count}} people",
     "reply": "Reply",

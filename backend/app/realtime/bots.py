@@ -16,6 +16,7 @@ from ..services.serializers import sid, user_card
 from .hub import Hub
 
 router = APIRouter()
+EXTRA_EVENTS = frozenset({"member.joined", "member.left", "member.updated", "reaction.update", "message.pin", "message.update", "server.updated", "structure.changed", "role.changed"})
 
 
 @dataclass(eq=False)
@@ -26,6 +27,7 @@ class BotConnection:
     token_hash: str
     closed: bool = False
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    events: set[str] = field(default_factory=lambda: {"message.create", "message.delete", "interaction.create"})
 
 
 class BotGateway:
@@ -121,7 +123,14 @@ class BotGateway:
         return bool(context and context.can_in(channel, Perm.VIEW_CHANNEL) and context.can_in(channel, needed))
 
     async def publish(self, topic: str, event: str, data: dict[str, Any]) -> None:
-        if not self.connections or event not in ("message.create", "message.delete") or not topic.startswith("channel:") or data.get("scope") != "channel":
+        if not self.connections or not any(event in c.events or event == "member.updated" and "structure.changed" in c.events for group in self.connections.values() for c in group):
+            return
+        if topic.startswith("server:") and event in EXTRA_EVENTS:
+            await self.publish_server(int(topic.split(":", 1)[1]), event, data)
+            return
+        if event not in ("message.create", "message.delete", "message.update", "reaction.update", "message.pin") or not topic.startswith("channel:"):
+            return
+        if event.startswith("message.") and event != "message.pin" and data.get("scope") != "channel":
             return
         channel_id = int(topic.split(":", 1)[1])
         async with self.app.state.session_factory() as db:
@@ -131,12 +140,54 @@ class BotGateway:
             installed_ids = set((await db.execute(select(BotInstall.bot_user_id).where(BotInstall.server_id == channel.server_id, BotInstall.bot_user_id.in_(list(self.connections))))).scalars())
             for bot_id in installed_ids:
                 for connection in list(self.connections.get(bot_id, ())):
+                    if event not in connection.events:
+                        continue
                     if not await self.valid(db, connection):
                         await self.close(connection)
                     elif await self.authorized(db, connection, channel):
-                        payload = {key: data[key] for key in ("id", "scope", "channel_id", "author", "content", "deleted", "created_at", "reply_to") if key in data}
+                        payload = {key: data[key] for key in ("id", "scope", "channel_id", "author", "content", "deleted", "created_at", "edited_at", "reply_to", "message_id", "emoji", "user_id", "present", "pinned") if key in data}
                         payload["server_id"] = sid(channel.server_id)
                         await self.send(connection, event, payload)
+
+    async def publish_server(self, server_id: int, event: str, data: dict) -> None:
+        from ..services.bot_resources import member_payload, visible_text_channels
+
+        async with self.app.state.session_factory() as db:
+            bot_ids = (await db.execute(select(BotInstall.bot_user_id).where(BotInstall.server_id == server_id, BotInstall.bot_user_id.in_(list(self.connections))))).scalars()
+            for bot_id in bot_ids:
+                context = await load_context(db, server_id, bot_id)
+                if context is None:
+                    continue
+                visible = await visible_text_channels(db, context)
+                for connection in list(self.connections.get(bot_id, ())):
+                    raw = data.get("user_id") or (data.get("user") or {}).get("id")
+                    refresh_self = event == "member.updated" and str(raw) == str(bot_id) and "structure.changed" in connection.events
+                    if event not in connection.events and not refresh_self:
+                        continue
+                    if not await self.valid(db, connection):
+                        await self.close(connection)
+                        continue
+                    if refresh_self:
+                        await self.send(connection, "structure.changed", {"server_id": sid(server_id), "channels": visible, "my_permissions": context.base, "my_role_ids": [sid(role_id) for role_id in context.member_role_ids]})
+                    if event not in connection.events:
+                        continue
+                    if event.startswith("member."):
+                        if not visible:
+                            continue
+                        if not raw or not str(raw).isdigit():
+                            continue
+                        payload = await member_payload(db, server_id, int(raw))
+                        if payload is None:
+                            continue
+                        await self.send(connection, event, {"server_id": sid(server_id), "user_id": str(raw), "member": payload})
+                    elif event == "structure.changed":
+                        await self.send(connection, event, {"server_id": sid(server_id), "channels": visible})
+                    elif event == "role.changed":
+                        from ..services.serializers import role_dict
+
+                        await self.send(connection, event, {"server_id": sid(server_id), "roles": [role_dict(role) for role in context.roles.values()], "channels": visible, "my_permissions": context.base, "my_role_ids": [sid(role_id) for role_id in context.member_role_ids]})
+                    elif event == "server.updated":
+                        await self.send(connection, event, {"server_id": sid(server_id), "name": context.server.name, "description": context.server.description, "owner_id": sid(context.server.owner_id)})
 
     async def interaction(self, bot_id: int, channel_id: int, data: dict) -> bool:
         async with self.app.state.session_factory() as db:
@@ -198,9 +249,15 @@ async def gateway(websocket: WebSocket) -> None:
                 frame = json.loads(raw)
             except (ValueError, TypeError):
                 raise AppError("validation_error", 422)
-            if not isinstance(frame, dict) or frame.get("op") != "ping":
+            if not isinstance(frame, dict):
                 raise AppError("bot_gateway_operation", 422)
-            await manager.send(connection, "pong", {})
+            if frame.get("op") == "ping":
+                await manager.send(connection, "pong", {})
+            elif frame.get("op") == "subscribe" and isinstance(frame.get("events"), list) and len(frame["events"]) <= len(EXTRA_EVENTS) and all(isinstance(event, str) and event in EXTRA_EVENTS for event in frame["events"]):
+                connection.events = {"message.create", "message.delete", "interaction.create", *frame["events"]}
+                await manager.send(connection, "subscribed", {"events": sorted(connection.events)})
+            else:
+                raise AppError("bot_gateway_operation", 422)
     except AppError as error:
         if connection is not None:
             await manager.close(connection, 4429 if error.status == 429 else 4401)

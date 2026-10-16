@@ -115,3 +115,39 @@ def test_package_contains_no_python_comments_or_docstrings():
         for node in ast.walk(ast.parse(source)):
             if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 assert ast.get_docstring(node) is None
+
+
+def test_gateway_reconnects_with_backoff_and_close_stops_retrying(monkeypatch):
+    import pollakcord.client as module
+
+    async def scenario():
+        bot = Bot("https://school.example", "test-secret")
+        attempts = []
+        async def connect_once():
+            attempts.append(len(attempts))
+            if len(attempts) == 1:
+                raise OSError("Temporary disconnect")
+            bot._closing.set()
+        monkeypatch.setattr(bot, "_connect_once", connect_once)
+        monkeypatch.setattr(module.random, "random", lambda: 0)
+        await asyncio.wait_for(bot.start(reconnect=True), timeout=4)
+        assert len(attempts) == 2 and bot._http.is_closed
+    asyncio.run(scenario())
+
+
+def test_revoked_gateway_is_terminal_and_does_not_reconnect(monkeypatch):
+    from websockets.exceptions import ConnectionClosedError
+    from websockets.frames import Close
+
+    async def scenario():
+        bot = Bot("https://school.example", "test-secret")
+        attempts = []
+        async def connect_once():
+            attempts.append(1)
+            raise ConnectionClosedError(Close(4401, ""), Close(4401, ""), True)
+        monkeypatch.setattr(bot, "_connect_once", connect_once)
+        with pytest.raises(BotHTTPError) as error:
+            await bot.start()
+        assert error.value.status == 401 and len(attempts) == 1 and bot._http.is_closed
+        assert "test-secret" not in str(error.value)
+    asyncio.run(scenario())

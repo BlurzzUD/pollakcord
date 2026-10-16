@@ -87,6 +87,7 @@ export function MessageItem(props: MessageItemProps) {
           {compact ? <BotBadge isBot={author?.is_bot} /> : null}
           <div className="message__content">
             <RichText content={message.content ?? ""} names={names} />
+            {message.edited_at ? <small className="muted" title={formatDateTime(message.edited_at)}>{t("message.edited")}</small> : null}
           </div>
           <MessageMedia attachments={message.attachments} embeds={message.embeds} giphyId={message.giphy_id} />
           {message.reactions.length > 0 ? (
