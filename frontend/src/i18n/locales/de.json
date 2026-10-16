@@ -381,7 +381,11 @@
     "username_reserved": "Dieser Benutzername ist reserviert.",
     "username_taken": "Dieser Benutzername ist bereits vergeben.",
     "validation_error": "Die übermittelten Daten sind ungültig.",
-    "voice_channel_full": "Der Sprachkanal ist voll."
+    "voice_channel_full": "Der Sprachkanal ist voll.",
+    "attachment_invalid": "Dieser Anhang ist ungültig, abgelaufen oder gehört zu einem anderen Gespräch.",
+    "attachment_limit_reached": "Du kannst bis zu {{max}} Dateien an eine Nachricht anhängen.",
+    "giphy_disabled": "Die GIF-Suche ist derzeit deaktiviert.",
+    "giphy_unavailable": "GIPHY ist momentan nicht erreichbar. Versuche es später erneut."
   },
   "forms": {
     "add_option": "Option hinzufügen",
@@ -1003,5 +1007,26 @@
     "verify_note": "Wenn die Codes abweichen, beende den Anruf und informiere die Moderation.",
     "verify_pending": "Warte auf die Verbindung …",
     "verify_title": "Sicherheitscode"
+  },
+  "media": {
+    "external_title": "Externe Website öffnen",
+    "external_warning": "Dieser Link öffnet eine Website außerhalb von PollákCord. Sie kann unsicher sein und Phishing, Schadsoftware oder irreführende Inhalte enthalten. Fahre nur fort, wenn du der Adresse vertraust.",
+    "continue": "In neuem Tab fortfahren",
+    "attach": "Datei anhängen",
+    "pending": "Angehängte Dateien und GIF",
+    "remove": "{{filename}} entfernen",
+    "remove_gif": "GIF entfernen",
+    "uploading": "{{filename}} wird hochgeladen: {{percent}}%",
+    "limit": "Bis zu {{size}} pro Datei",
+    "download": "Herunterladen",
+    "giphy_title": "GIPHY-GIFs suchen",
+    "giphy_search": "GIF-Suchbegriff",
+    "search": "Suchen",
+    "giphy_rating": "Schulfilter: höchstens Altersfreigabe PG.",
+    "giphy_insert": "GIF {{title}} einfügen",
+    "giphy_empty": "Keine Ergebnisse. Versuche einen anderen Suchbegriff.",
+    "giphy_powered": "Powered by GIPHY",
+    "giphy_selected": "GIPHY-GIF ausgewählt",
+    "giphy_unavailable": "Dieses GIF kann gerade nicht angezeigt werden."
   }
 }

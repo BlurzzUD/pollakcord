@@ -114,7 +114,11 @@
     "username_reserved": "Dieser Benutzername ist reserviert.",
     "username_taken": "Dieser Benutzername ist bereits vergeben.",
     "validation_error": "Die übermittelten Daten sind ungültig.",
-    "voice_channel_full": "Der Sprachkanal ist voll."
+    "voice_channel_full": "Der Sprachkanal ist voll.",
+    "attachment_invalid": "Dieser Anhang ist ungültig, abgelaufen oder gehört zu einem anderen Gespräch.",
+    "attachment_limit_reached": "Du kannst bis zu {max} Dateien an eine Nachricht anhängen.",
+    "giphy_disabled": "Die GIF-Suche ist derzeit deaktiviert.",
+    "giphy_unavailable": "GIPHY ist momentan nicht erreichbar. Versuche es später erneut."
   },
   "server": {
     "category_text": "Textkanäle",

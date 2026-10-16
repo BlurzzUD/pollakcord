@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
-import type { HistoryPage, Id, Message } from "../../api/types";
+import type { HistoryPage, Id, Message, MessageMediaInput } from "../../api/types";
 import { realtime } from "../../realtime/socket";
 import { useRealtimeEvent } from "../../realtime/useRealtimeEvent";
 import { useAuth } from "../../store/auth";
@@ -85,7 +85,7 @@ export function useTimeline(scope: Scope, id: Id, onRead: () => void) {
     }
     setMessages((current) =>
       current.map((m) =>
-        m.id === event.id ? { ...m, deleted: true, content: null, reactions: [], pinned: false } : m.reply_to?.id === event.id ? { ...m, reply_to: { ...m.reply_to, deleted: true, preview: null } } : m,
+        m.id === event.id ? { ...m, deleted: true, content: null, reactions: [], pinned: false, attachments: [], embeds: [], giphy_id: null } : m.reply_to?.id === event.id ? { ...m, reply_to: { ...m.reply_to, deleted: true, preview: null } } : m,
       ),
     );
   });
@@ -137,8 +137,8 @@ export function useTimeline(scope: Scope, id: Id, onRead: () => void) {
   }, [base, messages, loadingOlder]);
 
   const send = useCallback(
-    async (content: string, replyTo: Id | null) => {
-      const message = await api.post<Message>(`${base}/messages`, { content, reply_to_id: replyTo });
+    async (content: string, replyTo: Id | null, media?: MessageMediaInput) => {
+      const message = await api.post<Message>(`${base}/messages`, { content, reply_to_id: replyTo, ...(media ? { attachment_ids: media.attachmentIds, giphy_id: media.giphyId } : {}) });
       setMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
     },
     [base],

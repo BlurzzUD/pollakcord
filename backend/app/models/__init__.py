@@ -1,4 +1,5 @@
 from .audit import AuditLog, Notification
+from .attachment import Attachment
 from .auth import AuthMethod, AuthSession, RecoveryCode, TotpConfig
 from .class_space import ClassSpaceMember, ClassSpaceMessage
 from .dok import DokMessage, DokThread
@@ -29,6 +30,7 @@ from .social import Block, FriendRequest, Friendship
 from .user import Profile, SchoolClass, Theme, User, UserIdentity, UserSettings
 
 __all__ = [
+    "Attachment",
     "AuditLog",
     "AuthMethod",
     "AuthSession",

@@ -127,6 +127,41 @@ export interface Message {
   reply_to: ReplyPreview | null;
   pinned: boolean;
   reactions: Reaction[];
+  attachments?: Attachment[];
+  embeds?: LinkEmbed[];
+  giphy_id?: string | null;
+}
+
+export interface Attachment {
+  id: Id;
+  filename: string;
+  size_bytes: number;
+  mime_type: string;
+  kind: "image" | "video" | "file";
+  url: string;
+}
+
+export interface LinkEmbed {
+  url: string;
+  host: string;
+  title: string;
+  description?: string;
+  site_name?: string;
+  image?: string | null;
+  icon?: string | null;
+}
+
+export interface MediaConfig {
+  public_origin: string;
+  max_attachment_bytes: number;
+  max_attachments: number;
+  giphy_api_key: string | null;
+  giphy_rating: "pg";
+}
+
+export interface MessageMediaInput {
+  attachmentIds: Id[];
+  giphyId: string | null;
 }
 
 export interface HistoryPage {
@@ -271,6 +306,7 @@ export interface ReportEntry {
 
 export interface Meta {
   app_name: string;
+  public_origin?: string;
   reactions: string[];
   permissions: string[];
   report_reasons: string[];
@@ -327,6 +363,7 @@ export interface DokMessage {
   mine: boolean;
   content: string;
   created_at: string;
+  embeds?: LinkEmbed[];
 }
 
 export interface DokHistoryPage {
@@ -371,6 +408,7 @@ export interface ClassSpaceMessage {
   mine: boolean;
   content: string;
   created_at: string;
+  embeds?: LinkEmbed[];
 }
 
 export interface ClassSpaceHistoryPage {

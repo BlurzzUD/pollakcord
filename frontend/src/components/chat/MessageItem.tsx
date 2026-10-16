@@ -9,6 +9,7 @@ import { Avatar } from "../Avatar";
 import { CopyId } from "../CopyId";
 import { Icon } from "../Icon";
 import { RichText } from "./RichText";
+import { MessageMedia } from "./MessageMedia";
 
 interface MessageItemProps {
   message: Message;
@@ -84,6 +85,7 @@ export function MessageItem(props: MessageItemProps) {
           <div className="message__content">
             <RichText content={message.content ?? ""} names={names} />
           </div>
+          <MessageMedia attachments={message.attachments} embeds={message.embeds} giphyId={message.giphy_id} />
           {message.reactions.length > 0 ? (
             <div className="message__reactions">
               {message.reactions.map((reaction) => (

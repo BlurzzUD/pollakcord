@@ -11,6 +11,7 @@ class RateLimiter:
     def __init__(self, enabled: bool = True) -> None:
         self.enabled = enabled
         self._hits: dict[str, deque[float]] = {}
+        self._weighted_hits: dict[str, deque[tuple[float, int]]] = {}
         self._last_cleanup = time.monotonic()
 
     def check(self, key: str, limit: int, window: float) -> float | None:
@@ -29,6 +30,23 @@ class RateLimiter:
     def reset(self, key: str) -> None:
         self._hits.pop(key, None)
 
+    def check_weight(self, key: str, weight: int, limit: int, window: float) -> float | None:
+        if not self.enabled:
+            return None
+        now = time.monotonic()
+        bucket = self._weighted_hits.setdefault(key, deque())
+        while bucket and bucket[0][0] <= now - window:
+            bucket.popleft()
+        if sum(amount for _, amount in bucket) + weight > limit:
+            return max(1.0, window - (now - bucket[0][0])) if bucket else window
+        if bucket and now - bucket[-1][0] < 1:
+            stamp, amount = bucket.pop()
+            bucket.append((stamp, amount + weight))
+        else:
+            bucket.append((now, weight))
+        self._cleanup(now, window)
+        return None
+
     def _cleanup(self, now: float, window: float) -> None:
         if now - self._last_cleanup < 60:
             return
@@ -36,6 +54,8 @@ class RateLimiter:
         stale = [k for k, bucket in self._hits.items() if not bucket or bucket[-1] <= now - max(window, 3600)]
         for key in stale:
             del self._hits[key]
+        for key in [k for k, bucket in self._weighted_hits.items() if not bucket or bucket[-1][0] <= now - max(window, 3600)]:
+            del self._weighted_hits[key]
 
 
 def enforce(request: Request, name: str, limit: int, window: float, subject: str | None = None) -> None:

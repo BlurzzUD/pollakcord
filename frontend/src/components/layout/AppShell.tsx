@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Navigate, Outlet, useLocation, useMatch } from "react-router-dom";
 
 import { useAuth } from "../../store/auth";
+import { useMeta } from "../../api/hooks";
 import { useUi } from "../../store/ui";
 import { ClassSpacePrompt } from "../classspace/ClassSpacePrompt";
 import { Spinner } from "../EmptyState";
@@ -18,6 +19,7 @@ import { VoiceDock } from "./VoiceDock";
 
 function ShellLayout() {
   const { t } = useTranslation();
+  useMeta();
   const location = useLocation();
   const serverMatch = useMatch("/app/server/:serverId/*");
   const drawerOpen = useUi((state) => state.drawerOpen);

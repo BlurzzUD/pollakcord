@@ -14,6 +14,8 @@ from ..models import ClassSpaceMember, ClassSpaceMessage, Profile, ReadState, Sc
 from ..models.enums import AccountStatus
 from .messages import clean_content
 from .serializers import iso, sid, user_card
+from .link_embeds import EmbedService
+from .message_media import open_media, seal_media
 
 logger = get_logger("pollakcord.class_space")
 PURPOSE = "class-space-message"
@@ -38,9 +40,10 @@ def class_summary(school_class: SchoolClass) -> dict[str, Any]:
 
 
 class ClassSpaceService:
-    def __init__(self, vault: Vault, settings: Settings) -> None:
+    def __init__(self, vault: Vault, settings: Settings, embeds: EmbedService | None = None) -> None:
         self._vault = vault
         self._max_length = settings.message_max_length
+        self._embeds = embeds or EmbedService(settings)
 
     @staticmethod
     def _aad(message_id: int, school_class_id: int) -> bytes:
@@ -212,6 +215,7 @@ class ClassSpaceService:
 
     async def send(self, db: AsyncSession, school_class: SchoolClass, member: ClassSpaceMember, author: User, content: str) -> ClassSpaceMessage:
         text = clean_content(content, self._max_length)
+        embeds = await self._embeds.build(text)
         message_id = new_id()
         body_enc, key_id = self._vault.encrypt(PURPOSE, text.encode("utf-8"), self._aad(message_id, school_class.id))
         message = ClassSpaceMessage(
@@ -223,6 +227,7 @@ class ClassSpaceService:
             key_id=key_id,
         )
         db.add(message)
+        message.media_enc, message.media_key_id = seal_media(self._vault, f"class-space|{school_class.id}", message_id, embeds)
         await db.flush()
         return message
 
@@ -262,6 +267,7 @@ class ClassSpaceService:
                     "alias": self.alias(school_class.id, author_id) if anonymous_alias and author_id is not None else None,
                     "mine": mine,
                     "content": self._open(message) or "",
+                    "embeds": open_media(self._vault, f"class-space|{school_class.id}", message.id, message.media_enc, message.media_key_id)["embeds"],
                     "created_at": iso(message.created_at),
                 }
             )

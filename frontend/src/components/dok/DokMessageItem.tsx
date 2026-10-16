@@ -5,6 +5,7 @@ import { roleLabel } from "../../utils/dok";
 import { formatDateTime, formatTime } from "../../utils/format";
 import { Icon } from "../Icon";
 import { DokText } from "./DokText";
+import { LinkEmbeds } from "../chat/MessageMedia";
 
 export function DokMessageItem({ message }: { message: DokMessage }) {
   const { t } = useTranslation();
@@ -30,6 +31,7 @@ export function DokMessageItem({ message }: { message: DokMessage }) {
           <div className="message__content">
             <DokText content={message.content} />
           </div>
+          <LinkEmbeds embeds={message.embeds} />
         </div>
       </div>
     </article>

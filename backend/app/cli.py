@@ -10,6 +10,7 @@ from .db.session import build_engine, build_session_factory
 from .models import User
 from .models.enums import PlatformRole
 from .seed import ensure_school_classes
+from .services.attachments import cleanup_attachments
 
 
 async def grant_role(username: str, role: str) -> int:
@@ -42,11 +43,24 @@ async def seed() -> int:
     return 0
 
 
+async def cleanup_media() -> int:
+    settings = get_settings()
+    engine = build_engine(settings)
+    try:
+        async with build_session_factory(engine)() as db:
+            removed = await cleanup_attachments(db, settings)
+        print(f"removed {removed} expired or orphaned attachment files")
+    finally:
+        await engine.dispose()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="pollakcord")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("generate-key")
     sub.add_parser("seed")
+    sub.add_parser("cleanup-media")
     grant = sub.add_parser("grant-role")
     grant.add_argument("username")
     grant.add_argument("role", choices=[r.value for r in PlatformRole])
@@ -56,6 +70,8 @@ def main() -> int:
         return 0
     if args.command == "seed":
         return asyncio.run(seed())
+    if args.command == "cleanup-media":
+        return asyncio.run(cleanup_media())
     return asyncio.run(grant_role(args.username, args.role))
 
 

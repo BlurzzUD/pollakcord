@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { Message } from "../../api/types";
+import type { MediaConfig, Message, MessageMediaInput } from "../../api/types";
 import { realtime } from "../../realtime/socket";
 import { encodeMentions } from "../../utils/text";
 import { Avatar } from "../Avatar";
 import { ErrorText } from "../ErrorText";
 import { Icon } from "../Icon";
+import { GiphyPicker } from "./GiphyPicker";
+import { formatFileSize } from "./MessageMedia";
+import { useComposerMedia } from "./useComposerMedia";
 
 export interface MentionCandidate {
   id: string;
@@ -21,13 +24,14 @@ interface ComposerProps {
   typingTarget: { scope: "dm" | "channel"; id: string };
   replyTo: Message | null;
   onCancelReply: () => void;
-  onSend: (content: string, replyTo: string | null) => Promise<void>;
+  onSend: (content: string, replyTo: string | null, media?: MessageMediaInput) => Promise<void>;
   candidates: MentionCandidate[];
+  mediaConfig?: MediaConfig;
 }
 
 const TYPING_INTERVAL_MS = 3000;
 
-export function Composer({ placeholder, disabledReason, maxLength, typingTarget, replyTo, onCancelReply, onSend, candidates }: ComposerProps) {
+export function Composer({ placeholder, disabledReason, maxLength, typingTarget, replyTo, onCancelReply, onSend, candidates, mediaConfig }: ComposerProps) {
   const { t } = useTranslation();
   const [text, setText] = useState("");
   const [error, setError] = useState<unknown>(null);
@@ -35,12 +39,18 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [cursor, setCursor] = useState(0);
   const [active, setActive] = useState(0);
+  const [giphyOpen, setGiphyOpen] = useState(false);
+  const media = useComposerMedia(typingTarget, mediaConfig);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const currentTarget = useRef(typingTarget.id);
+  currentTarget.current = typingTarget.id;
   const area = useRef<HTMLTextAreaElement>(null);
   const lastTyping = useRef(0);
 
   useEffect(() => {
     setText("");
     setPicks({});
+    setGiphyOpen(false);
   }, [typingTarget.id]);
 
   useEffect(() => {
@@ -92,16 +102,25 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
 
   const submit = async () => {
     const content = encodeMentions(text.trim(), picks);
-    if (!content || busy || disabledReason) {
+    const hasMedia = media.attachments.length > 0 || Boolean(media.giphyId);
+    if ((!content && !hasMedia) || busy || media.uploading || disabledReason) {
       return;
     }
+    const target = typingTarget.id;
     setBusy(true);
     setError(null);
     try {
-      await onSend(content, replyTo?.id ?? null);
-      setText("");
-      setPicks({});
-      onCancelReply();
+      if (hasMedia) {
+        await onSend(content, replyTo?.id ?? null, { attachmentIds: media.attachments.map((file) => file.id), giphyId: media.giphyId });
+      } else {
+        await onSend(content, replyTo?.id ?? null);
+      }
+      if (currentTarget.current === target) {
+        media.commit();
+        setText("");
+        setPicks({});
+        onCancelReply();
+      }
     } catch (failure) {
       setError(failure);
     } finally {
@@ -153,6 +172,17 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
         </ul>
       ) : null}
       <div className="composer__row">
+        {mediaConfig ? (
+          <>
+            <input ref={fileInput} type="file" multiple hidden aria-label={t("media.attach")} onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              void media.selectFiles(files);
+            }} />
+            <button type="button" className="icon-button" onClick={() => fileInput.current?.click()} disabled={busy || media.uploading || Boolean(disabledReason)} aria-label={t("media.attach")} title={t("media.attach")}><Icon name="plus" /></button>
+            {mediaConfig.giphy_api_key ? <button type="button" className="button button--small button--ghost" disabled={busy || media.uploading || Boolean(disabledReason)} onClick={() => setGiphyOpen(true)} aria-label={t("media.giphy_title")}>GIF</button> : null}
+          </>
+        ) : null}
         <label className="sr-only" htmlFor="composer-input">
           {placeholder}
         </label>
@@ -163,7 +193,7 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
           value={text}
           maxLength={maxLength}
           placeholder={disabledReason ?? placeholder}
-          disabled={Boolean(disabledReason)}
+          disabled={busy || Boolean(disabledReason)}
           onChange={(event) => {
             setText(event.target.value);
             setCursor(event.target.selectionStart);
@@ -174,15 +204,25 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
           onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
           onKeyDown={onKeyDown}
         />
-        <button type="button" className="button button--primary composer__send" onClick={() => void submit()} disabled={busy || !text.trim() || Boolean(disabledReason)} aria-label={t("message.send")}>
+        <button type="button" className="button button--primary composer__send" onClick={() => void submit()} disabled={busy || media.uploading || (!text.trim() && media.attachments.length === 0 && !media.giphyId) || Boolean(disabledReason)} aria-label={t("message.send")}>
           <Icon name="send" />
         </button>
       </div>
+      {media.attachments.length > 0 || media.giphyId ? (
+        <ul className="composer-attachments" aria-label={t("media.pending")}>
+          {media.attachments.map((file) => <li key={file.id}><span>{file.filename} · {formatFileSize(file.size_bytes)} · {file.mime_type}</span><button type="button" className="icon-button" disabled={busy} onClick={() => media.remove(file.id)} aria-label={t("media.remove", { filename: file.filename })}><Icon name="close" size={16} /></button></li>)}
+          {media.giphyId ? <li><span>{t("media.giphy_selected")}</span><button type="button" className="icon-button" disabled={busy} onClick={() => media.setGiphyId(null)} aria-label={t("media.remove_gif")}><Icon name="close" size={16} /></button></li> : null}
+        </ul>
+      ) : null}
+      {media.progress ? <div className="composer-upload" role="status"><label htmlFor="attachment-progress">{t("media.uploading", { filename: media.progress.filename, percent: media.progress.percent })}</label><progress id="attachment-progress" max={100} value={media.progress.percent} /></div> : null}
       <div className="composer__meta">
         <span className="muted">{t("message.composer_hint")}</span>
+        {mediaConfig ? <span className="muted">{t("media.limit", { size: formatFileSize(mediaConfig.max_attachment_bytes) })}</span> : null}
         {remaining < 200 ? <span className={remaining < 0 ? "form-error" : "muted"}>{remaining}</span> : null}
       </div>
       <ErrorText error={error} />
+      <ErrorText error={media.error} />
+      {giphyOpen && mediaConfig?.giphy_api_key ? <GiphyPicker apiKey={mediaConfig.giphy_api_key} onClose={() => setGiphyOpen(false)} onChoose={(id) => { media.setGiphyId(id); setGiphyOpen(false); }} /> : null}
     </div>
   );
 }

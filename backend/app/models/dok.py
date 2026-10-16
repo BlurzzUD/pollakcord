@@ -28,5 +28,7 @@ class DokMessage(Base):
     author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     author_role: Mapped[str] = mapped_column(String(24))
     body_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    media_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    media_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     key_id: Mapped[str] = mapped_column(String(16))
     created_at: Mapped[datetime] = created_column()

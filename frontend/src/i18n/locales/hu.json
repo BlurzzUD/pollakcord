@@ -381,7 +381,11 @@
     "username_reserved": "Ez a felhasználónév le van foglalva.",
     "username_taken": "Ez a felhasználónév már foglalt.",
     "validation_error": "A megadott adatok érvénytelenek.",
-    "voice_channel_full": "A hangcsatorna megtelt."
+    "voice_channel_full": "A hangcsatorna megtelt.",
+    "attachment_invalid": "Ez a melléklet érvénytelen, lejárt vagy nem ehhez a beszélgetéshez tartozik.",
+    "attachment_limit_reached": "Egy üzenethez legfeljebb {{max}} fájlt csatolhatsz.",
+    "giphy_disabled": "A GIF-keresés jelenleg nincs engedélyezve.",
+    "giphy_unavailable": "A GIPHY most nem érhető el. Próbáld újra később."
   },
   "forms": {
     "add_option": "Válaszlehetőség hozzáadása",
@@ -1003,5 +1007,26 @@
     "verify_note": "Ha a kódok eltérnek, szakítsd meg a hívást, és jelezd a moderátoroknak.",
     "verify_pending": "Várakozás a kapcsolatra…",
     "verify_title": "Biztonsági kód"
+  },
+  "media": {
+    "external_title": "Külső webhely megnyitása",
+    "external_warning": "Ez a hivatkozás a PollákCordon kívüli webhelyet nyit meg. Az oldal veszélyes lehet: adathalászatot, kártevőt vagy megtévesztő tartalmat is tartalmazhat. Csak akkor folytasd, ha megbízol a címben.",
+    "continue": "Folytatás új lapon",
+    "attach": "Fájl csatolása",
+    "pending": "Csatolt fájlok és GIF",
+    "remove": "{{filename}} eltávolítása",
+    "remove_gif": "GIF eltávolítása",
+    "uploading": "{{filename}} feltöltése: {{percent}}%",
+    "limit": "Legfeljebb {{size}} fájlonként",
+    "download": "Letöltés",
+    "giphy_title": "GIF keresése a GIPHY-n",
+    "giphy_search": "GIF keresőkifejezés",
+    "search": "Keresés",
+    "giphy_rating": "Iskolai szűrés: legfeljebb PG besorolás.",
+    "giphy_insert": "{{title}} GIF beszúrása",
+    "giphy_empty": "Nincs találat. Próbálj másik keresőkifejezést.",
+    "giphy_powered": "Powered by GIPHY",
+    "giphy_selected": "GIPHY GIF kiválasztva",
+    "giphy_unavailable": "Ez a GIF most nem jeleníthető meg."
   }
 }

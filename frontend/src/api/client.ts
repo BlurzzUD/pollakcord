@@ -107,16 +107,78 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (await response.json()) as T;
 }
 
+interface UploadOptions {
+  query?: RequestOptions["query"];
+  signal?: AbortSignal;
+  onProgress?: (percent: number) => void;
+}
+
+async function uploadProgress<T>(path: string, file: File, options: UploadOptions, retried = false): Promise<T> {
+  const csrf = await ensureCsrf();
+  if (options.signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const response = await new Promise<Response>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    const done = () => options.signal?.removeEventListener("abort", abort);
+    xhr.open("POST", buildUrl(path, options.query));
+    xhr.withCredentials = true;
+    xhr.timeout = 30 * 60 * 1000;
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Accept-Language", i18n.language || "hu");
+    xhr.setRequestHeader("X-CSRF-Token", csrf);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        options.onProgress?.(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+      }
+    };
+    xhr.onload = () => {
+      done();
+      if (!xhr.status) {
+        reject(new TypeError("network_error"));
+        return;
+      }
+      resolve(new Response(xhr.responseText, { status: xhr.status }));
+    };
+    xhr.onerror = xhr.ontimeout = () => {
+      done();
+      reject(new TypeError("network_error"));
+    };
+    xhr.onabort = () => {
+      done();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
+  if (!response.ok) {
+    const error = await toError(response);
+    if (error.code === "csrf_failed" && !retried) {
+      await ensureCsrf(true);
+      return uploadProgress<T>(path, file, options, true);
+    }
+    throw error;
+  }
+  options.onProgress?.(100);
+  return (await response.json()) as T;
+}
+
 export const api = {
   get: <T>(path: string, query?: RequestOptions["query"], signal?: AbortSignal) => request<T>(path, { query, signal }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body ?? {} }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: body ?? {} }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: body ?? {} }),
   del: <T>(path: string, body?: unknown, query?: RequestOptions["query"]) => request<T>(path, { method: "DELETE", body, query }),
-  upload: <T>(path: string, file: File) => {
+  upload: <T>(path: string, file: File, options?: UploadOptions) => {
+    if (options?.onProgress) {
+      return uploadProgress<T>(path, file, options);
+    }
     const form = new FormData();
     form.append("file", file);
-    return request<T>(path, { method: "POST", form });
+    return request<T>(path, { method: "POST", form, query: options?.query, signal: options?.signal });
   },
 };
 

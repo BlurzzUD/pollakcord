@@ -29,6 +29,9 @@ from ..models import (
 )
 from ..models.enums import ScopeKind
 from .serializers import iso, sid, user_card
+from .attachments import attachments_for, claim_attachments, delete_message_attachments
+from .link_embeds import EmbedService
+from .message_media import open_media, seal_media, validate_giphy
 
 logger = get_logger("pollakcord.messages")
 ALLOWED_REACTIONS = ("👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "👀", "✅", "❌", "🙏", "💯")
@@ -42,9 +45,9 @@ def extract_mentions(content: str) -> set[int]:
     return {int(match) for match in MENTION_PATTERN.findall(content)}
 
 
-def clean_content(content: str, limit: int) -> str:
+def clean_content(content: str, limit: int, *, allow_empty: bool = False) -> str:
     cleaned = content.replace("\x00", "").replace("\r\n", "\n").strip()
-    if not cleaned:
+    if not cleaned and not allow_empty:
         raise AppError("message_empty", 422)
     if len(cleaned) > limit:
         raise AppError("message_too_long", 422, params={"max": limit})
@@ -67,8 +70,10 @@ class MessageScope:
 
 
 class MessageService:
-    def __init__(self, vault: Vault, settings: Settings) -> None:
+    def __init__(self, vault: Vault, settings: Settings, embeds: EmbedService | None = None) -> None:
         self._vault = vault
+        self._settings = settings
+        self._embeds = embeds or EmbedService(settings)
         self._rotation = settings.data_key_rotation_messages
         self._max_length = settings.message_max_length
         self._cache: OrderedDict[int, bytes] = OrderedDict()
@@ -138,8 +143,11 @@ class MessageService:
         *,
         reply_to_id: int | None,
         mentions: set[int],
+        attachment_ids: list[int] | None = None,
+        giphy_id: str | None = None,
     ) -> tuple[Message, str]:
-        text = clean_content(content, self._max_length)
+        validate_giphy(giphy_id, self._settings)
+        text = clean_content(content, self._max_length, allow_empty=bool(attachment_ids or giphy_id))
         if reply_to_id is not None:
             target = await db.get(Message, reply_to_id)
             same_scope = target is not None and (
@@ -148,10 +156,13 @@ class MessageService:
             )
             if not same_scope or target.deleted_at is not None:
                 raise AppError("reply_target_invalid", 422)
+        embeds = await self._embeds.build(text)
         key_id, raw_key = await self._active_key(db, scope)
         message = Message(id=new_id(), author_id=author_id, reply_to_id=reply_to_id, **scope_columns(scope.kind, scope.scope_id))
+        message.media_enc, message.media_key_id = seal_media(self._vault, f"chat|{scope.kind.value}|{scope.scope_id}", message.id, embeds, giphy_id)
         db.add(message)
         await db.flush()
+        await claim_attachments(db, attachment_ids or [], author_id, scope.kind.value, scope.scope_id, message.id)
         sealed = seal(raw_key, text.encode("utf-8"), self._message_aad(message.id, scope.kind.value, scope.scope_id, author_id))
         db.add(MessageContent(message_id=message.id, data_key_id=key_id, ciphertext=sealed))
         await db.execute(update(DataKey).where(DataKey.id == key_id).values(message_count=DataKey.message_count + 1))
@@ -204,6 +215,7 @@ class MessageService:
         reply_ids = {m.reply_to_id for m in messages if m.reply_to_id}
         previews = await self._previews(db, reply_ids)
         reactions = await self._reactions(db, [m.id for m in messages], viewer_id)
+        attachments = await attachments_for(db, self._vault, [m.id for m in messages if m.deleted_at is None])
         result = []
         for message in messages:
             deleted = message.deleted_at is not None
@@ -220,6 +232,8 @@ class MessageService:
                     "reply_to": previews.get(message.reply_to_id) if message.reply_to_id else None,
                     "pinned": message.pinned_at is not None,
                     "reactions": [] if deleted else reactions.get(message.id, []),
+                    "attachments": [] if deleted else attachments.get(message.id, []),
+                    **({"embeds": [], "giphy_id": None} if deleted else open_media(self._vault, f"chat|{scope.kind.value}|{scope.scope_id}", message.id, message.media_enc, message.media_key_id)),
                 }
             )
         return result
@@ -280,6 +294,9 @@ class MessageService:
         message.deleted_at = utcnow()
         message.pinned_at = None
         message.pinned_by = None
+        message.media_enc = None
+        message.media_key_id = None
+        await delete_message_attachments(db, self._settings, message.id)
         for model in (MessageContent, SearchToken, Reaction, Mention):
             await db.execute(delete(model).where(model.message_id == message.id))
 

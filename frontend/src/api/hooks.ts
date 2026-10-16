@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "../store/auth";
 import { canCreateForms } from "../utils/roles";
+import { useLinkPolicy } from "../utils/links";
 import { api } from "./client";
 import type {
   AppNotification,
@@ -17,13 +18,32 @@ import type {
   FriendRequestEntry,
   Member,
   Meta,
+  MediaConfig,
   ServerDetail,
   ServerSummary,
   UserCard,
 } from "./types";
 
 export function useMeta() {
-  return useQuery({ queryKey: ["meta"], queryFn: () => api.get<Meta>("/meta"), staleTime: Infinity });
+  return useQuery({ queryKey: ["meta"], queryFn: async () => {
+    const meta = await api.get<Meta>("/meta");
+    if (meta.public_origin) {
+      useLinkPolicy.getState().setPublicOrigin(meta.public_origin);
+    }
+    return meta;
+  }, staleTime: Infinity });
+}
+
+export function useMediaConfig() {
+  const me = useAuth((state) => state.me);
+  return useQuery({
+    queryKey: ["media-config", me?.id, me?.platform_role], enabled: Boolean(me), retry: false,
+    queryFn: async () => {
+      const config = await api.get<MediaConfig>("/uploads/config");
+      useLinkPolicy.getState().setPublicOrigin(config.public_origin);
+      return config;
+    },
+  });
 }
 
 export function useServers() {

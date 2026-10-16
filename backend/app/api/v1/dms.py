@@ -143,7 +143,10 @@ async def send(
     service = request.app.state.messages
     scope = MessageScope(ScopeKind.DM, conversation_id)
     mentions = {other_id} & extract_mentions(body.content)
-    message, _ = await service.send(db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=mentions)
+    message, _ = await service.send(
+        db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=mentions,
+        attachment_ids=[parse_id(value) for value in body.attachment_ids], giphy_id=body.giphy_id,
+    )
     conversation.last_message_at = utcnow()
     await service.mark_read(db, auth.user.id, scope, message.id)
     payload = (await service.payloads(db, [message], auth.user.id, scope))[0]

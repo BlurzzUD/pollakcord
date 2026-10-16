@@ -21,15 +21,16 @@ def build_csp(settings: Settings) -> str:
     parsed = urlparse(settings.public_origin)
     websocket_scheme = "wss" if parsed.scheme == "https" else "ws"
     websocket_origin = f"{websocket_scheme}://{parsed.netloc}"
+    giphy_enabled = bool(settings.giphy_api_key and settings.giphy_api_key.get_secret_value().strip())
     return "; ".join(
         [
             "default-src 'self'",
             "script-src 'self'",
             "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: blob:",
+            "img-src 'self' data: blob:" + (" https://*.giphy.com" if giphy_enabled else ""),
             "font-src 'self'",
             "media-src 'self' blob:",
-            f"connect-src 'self' {websocket_origin}",
+            f"connect-src 'self' {websocket_origin}" + (" https://api.giphy.com" if giphy_enabled else ""),
             "object-src 'none'",
             "base-uri 'none'",
             "form-action 'self'",

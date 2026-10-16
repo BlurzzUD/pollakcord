@@ -12,6 +12,7 @@ async def meta(request: Request) -> dict:
     settings = request.app.state.settings
     return {
         "app_name": settings.app_name,
+        "public_origin": settings.public_origin,
         "reactions": list(ALLOWED_REACTIONS),
         "permissions": list(PERMISSION_NAMES),
         "report_reasons": list(REPORT_REASONS),

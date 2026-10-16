@@ -4,6 +4,7 @@ A Discord-style communication platform built for one school. Students prove they
 
 - Default language **Hungarian**, plus **English** and **German** (whole UI, errors, validation, tooltips, accessibility labels).
 - Original branding: a squared school notebook (cool paper, faint blue grid, red margin line) with a chalkboard dark theme. No third-party chat-platform assets.
+- The source code contains **no comments** (enforced by tests). This README is the documentation.
 - The supplied E-Kréta login script is used **exactly as provided**. It is never edited, rewritten or replaced (see [section 9](#9-e-kréta-integration-setup)).
 
 ## Table of contents
@@ -300,7 +301,7 @@ Generate a key: `python -m app generate-key` (from `backend/`).
 | --- | --- | --- |
 | `MESSAGE_MAX_LENGTH` | `4000` | Characters per message |
 | `DATA_KEY_ROTATION_MESSAGES` | `500000` | New data key per conversation/channel after this many messages |
-| `UPLOAD_DIR` | `<backend>/data/uploads` | Image storage |
+| `UPLOAD_DIR` | `<backend>/data/uploads` | Profile images and private message attachments |
 | `AVATAR_MAX_BYTES` / `BANNER_MAX_BYTES` / `ICON_MAX_BYTES` | 2 MiB / 6 MiB / 2 MiB | Upload size limits |
 | `MAX_IMAGE_PIXELS` | `25000000` | Decompression-bomb guard |
 | `WS_MAX_CONNECTIONS_PER_USER` | `6` | Open sockets per user (tabs/devices) |
@@ -561,7 +562,7 @@ server {
     server_name chat.example.hu;
     ssl_certificate     /etc/letsencrypt/live/chat.example.hu/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/chat.example.hu/privkey.pem;
-    client_max_body_size 8m;
+    client_max_body_size 260m;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -764,7 +765,7 @@ Every active class in `school_classes` has a private **class space**: one shared
 - **One-time prompt.** Until a user answers they are not a member (the safe default). `GET /class-spaces/me` returns `prompt_required: true` for anyone who has a class but no answer for it, so already registered users get a dismissible dialog on their next app load, and new registrations on their first visit to the home screen. Yes or No stores the answer, joins the space and the prompt never comes back; *Later* or closing it only hides it until the next visit. The answer can be changed under Settings, Account.
 - **Changing class.** `PUT /me/class` removes the membership of the old class in the same transaction, and clearing the class does the same. Old messages stay in the old space and are shown there without a name. The new class needs a fresh answer, and returning to a former class asks again.
 - **Moderation.** A member can report a message with `POST /class-spaces/{class}/messages/{id}/report`. It creates an ordinary escalated row in `reports` with an encrypted snapshot (the message plus context), so school moderators work from the existing queue, see the real authors, and every view and identity reveal is audited as before. No new reveal path exists. Authors can delete their own messages.
-- **Encrypted at rest.** Bodies are sealed with AES-256-GCM under `enc/class-space-message` (AAD `cspace|<message id>|<class id>`), and swapped rows fail authentication. Class space messages are not indexed for search and have no reactions, mentions, uploads or notifications. A `class_space.message` WebSocket event (ids only) refreshes open spaces.
+- **Encrypted at rest.** Bodies are sealed with AES-256-GCM under `enc/class-space-message` (AAD `cspace|<message id>|<class id>`), and swapped rows fail authentication. Class space messages are not indexed for search and have no reactions, mentions, uploads or notifications. Their text links share the external-site warning and cached link previews described in section 26. A `class_space.message` WebSocket event (ids only) refreshes open spaces.
 
 API (`/api/v1/class-spaces`): `GET /me`, `PUT /me/visibility`, `GET /{class}/members`, `GET|POST /{class}/messages`, `POST /{class}/read`, `DELETE /{class}/messages/{id}`, `POST /{class}/messages/{id}/report`.
 
@@ -852,7 +853,7 @@ A bulk re-wrap tool is **not** included, so keep old keys as long as old data ex
 Back up three things, **separately**:
 
 1. **Database:** `pg_dump -Fc pollakcord` on a schedule (and WAL archiving if you need point-in-time recovery).
-2. **Uploads:** the `uploads` volume / `POLLAKCORD_UPLOAD_DIR` (avatars, banners, server icons).
+2. **Uploads:** the `uploads` volume / `POLLAKCORD_UPLOAD_DIR` (avatars, banners, server icons, and private message attachments).
 3. **Secrets:** `MASTER_KEY`, `PREVIOUS_MASTER_KEYS`, `PEPPER` in a password manager or secret store, **not** next to the database backup.
 
 Remember:
@@ -936,7 +937,7 @@ Frontend tests: translation key/placeholder parity and coverage of every used ke
 
 ### Status at packaging time
 
-The complete backend suite passed at its last full run (248 tests; one further test was added afterwards and passed on its own), the frontend suite passed (56 tests), and the production frontend build succeeded. The class-space suites (`backend/tests/test_class_spaces.py`, `frontend/src/test/classSpace.test.tsx`) and the forms suites (`backend/tests/test_forms.py`, `frontend/src/test/forms.test.tsx`) were added afterwards in an environment without package installation, so they have not been run yet; run both suites, `npm run typecheck` and `npm run build` before merging. No automated tests exercise PostgreSQL, a real TURN server, real browsers' WebRTC stacks or the live E-Kréta service; test those in staging.
+The media/link change set passed 193 frontend tests, the production TypeScript/Vite build, and the no-comments check. The full backend run passed 370 tests; the existing `test_child_process_does_not_inherit_server_secrets` test failed because this execution environment has no `/proc/<pid>/environ`. Its code and the E-Kréta/authentication code were left unchanged. The final focused backend regression run passed all 157 tests, including real streamed 20 MB/250 MB boundaries for every human role, permissions, safe downloads, SSRF/failures, messaging, DÖK/class-space anonymity, migrations, translations, and source hygiene. See `MEDIA_CHANGESET.md` for exact commands and the environment limitation.
 
 ---
 
@@ -966,4 +967,31 @@ The complete backend suite passed at its last full run (248 tests; one further t
 
 Logs are JSON on stdout (`docker compose logs -f api`). Each request has an `X-Request-ID`; search for it to follow one request. Raise detail with `POLLAKCORD_LOG_LEVEL=DEBUG` (secrets stay redacted).
 
-wow you read it this deep 
+
+## 26. Message media and external links
+
+Server chat and DMs support ten private attachments and one GIPHY GIF per message, with upload progress. DÖK and class-space composers remain text-only and share link previews/warnings. Form text remains inert. Run `cd backend && alembic upgrade head` to apply additive migration `0005` before starting this version. See [MEDIA_CHANGESET.md](MEDIA_CHANGESET.md) for endpoints, security choices, storage cleanup, and validation.
+
+| Human platform role | Per-file limit |
+| --- | --- |
+| `user` | 20,000,000 bytes (20 MB) |
+| `dok_representative`, `dok_president`, `school_moderator`, `school_admin` | 250,000,000 bytes (250 MB) |
+
+The server enforces the current user's role and channel/DM permissions. Existing avatar/banner/icon limits remain in place. All attachment downloads require authentication and current scope access. Images are sanitized; other files download with attachment disposition, `nosniff`, and a sandbox CSP. Recognized MP4/WebM can play inline. Files reuse the uploads volume; schedule `cd backend && python -m app.cli cleanup-media` daily for expired drafts/orphans.
+
+All variables have the `POLLAKCORD_` prefix; `.env.example` includes them:
+
+| Variable | Default |
+| --- | --- |
+| `GIPHY_API_KEY` | empty: picker hidden |
+| `ATTACHMENT_MAX_BYTES` / `ATTACHMENT_ELEVATED_MAX_BYTES` | `20000000` / `250000000` |
+| `ATTACHMENT_HOURLY_BYTES` / `ATTACHMENT_ELEVATED_HOURLY_BYTES` | `200000000` / `1000000000` |
+| `LINK_EMBEDS_ENABLED` / `LINK_EMBED_TIMEOUT_SECONDS` | `true` / `4` |
+
+GIPHY uses a browser key, official direct browser requests, a PG filter, and attribution. Only GIF IDs are saved, with encrypted message metadata; media URLs are resolved again rather than cached/re-hosted, following [GIPHY guidance](https://developers.giphy.com/docs/api/). A missing key hides the picker; failed or removed GIFs show an unavailable label while the message remains readable. The key is intentionally visible to authenticated browsers; use an appropriate browser key and production approval.
+
+External HTTP(S) links and preview cards require confirmation before opening a new tab with `noopener noreferrer`. Canonical `PUBLIC_ORIGIN` links open normally. The server stores encrypted previews and sanitized thumbnails, with public-IP validation and DNS pinning, checks on every redirect, bounded bytes/time, and no cookies. Private/internal/app/admin URLs are skipped. Preview failures never block sending.
+
+**Operations:** every reverse proxy/tunnel must permit more than 250 MB plus multipart overhead, with suitable timeouts and spool/disk space. Raise any [Caddy `request_body max_size`](https://caddyserver.com/docs/caddyfile/directives/request_body) limit or Nginx `client_max_body_size` to at least 260 MB. Cloudflare Free/Pro normally have a 100 MB ceiling: verify [plan and zone limits](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/); changing the origin alone cannot make 250 MB pass. Per-user limits use the existing in-process limiter, with 60 uploads/hour (30 elevated) and the byte budgets above.
+
+**Bots:** bot attachment quotas, APIs, and UX are deliberately deferred until the bot merge. Human policy is separate from shared storage/metadata helpers for later reuse.

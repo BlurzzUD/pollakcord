@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     banner_max_bytes: int = 6 * 1024 * 1024
     icon_max_bytes: int = 2 * 1024 * 1024
     max_image_pixels: int = 25_000_000
+    attachment_max_bytes: int = Field(default=20_000_000, gt=0)
+    attachment_elevated_max_bytes: int = Field(default=250_000_000, gt=0)
+    attachment_hourly_bytes: int = Field(default=200_000_000, gt=0)
+    attachment_elevated_hourly_bytes: int = Field(default=1_000_000_000, gt=0)
+    giphy_api_key: SecretStr | None = None
+    link_embeds_enabled: bool = True
+    link_embed_timeout_seconds: float = Field(default=4.0, gt=0, le=15)
 
     message_max_length: int = 4000
     data_key_rotation_messages: int = 500_000

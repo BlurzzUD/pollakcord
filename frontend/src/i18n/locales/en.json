@@ -381,7 +381,11 @@
     "username_reserved": "This username is reserved.",
     "username_taken": "This username is already taken.",
     "validation_error": "The submitted data is invalid.",
-    "voice_channel_full": "The voice channel is full."
+    "voice_channel_full": "The voice channel is full.",
+    "attachment_invalid": "This attachment is invalid, expired, or belongs to a different conversation.",
+    "attachment_limit_reached": "You can attach up to {{max}} files to a message.",
+    "giphy_disabled": "GIF search is currently disabled.",
+    "giphy_unavailable": "GIPHY is unavailable. Please try again later."
   },
   "forms": {
     "add_option": "Add option",
@@ -1003,5 +1007,26 @@
     "verify_note": "If the codes differ, end the call and tell the moderators.",
     "verify_pending": "Waiting for the connection…",
     "verify_title": "Security code"
+  },
+  "media": {
+    "external_title": "Open an external website",
+    "external_warning": "This link opens a website outside PollákCord. It may be unsafe and could contain phishing, malware, or misleading content. Continue only if you trust the address.",
+    "continue": "Continue in new tab",
+    "attach": "Attach a file",
+    "pending": "Attached files and GIF",
+    "remove": "Remove {{filename}}",
+    "remove_gif": "Remove GIF",
+    "uploading": "Uploading {{filename}}: {{percent}}%",
+    "limit": "Up to {{size}} per file",
+    "download": "Download",
+    "giphy_title": "Search GIPHY GIFs",
+    "giphy_search": "GIF search term",
+    "search": "Search",
+    "giphy_rating": "School filter: PG rating or lower.",
+    "giphy_insert": "Insert {{title}} GIF",
+    "giphy_empty": "No results. Try another search term.",
+    "giphy_powered": "Powered by GIPHY",
+    "giphy_selected": "GIPHY GIF selected",
+    "giphy_unavailable": "This GIF cannot be displayed right now."
   }
 }

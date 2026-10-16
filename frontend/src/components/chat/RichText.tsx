@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import { useUi } from "../../store/ui";
 import { isSafeUrl, tokenizeMessage } from "../../utils/text";
+import { SafeLink } from "../SafeLink";
 
 export function RichText({ content, names }: { content: string; names: Record<string, string> }) {
   const { t } = useTranslation();
@@ -19,9 +20,9 @@ export function RichText({ content, names }: { content: string; names: Record<st
         }
         if (part.type === "link" && isSafeUrl(part.value)) {
           return (
-            <a key={index} href={part.value} target="_blank" rel="noopener noreferrer nofollow ugc">
+            <SafeLink key={index} href={part.value}>
               {part.value}
-            </a>
+            </SafeLink>
           );
         }
         return <span key={index}>{part.type === "text" ? part.value : part.type === "link" ? part.value : ""}</span>;

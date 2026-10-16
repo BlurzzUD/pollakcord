@@ -114,7 +114,11 @@
     "username_reserved": "Ez a felhasználónév le van foglalva.",
     "username_taken": "Ez a felhasználónév már foglalt.",
     "validation_error": "A megadott adatok érvénytelenek.",
-    "voice_channel_full": "A hangcsatorna megtelt."
+    "voice_channel_full": "A hangcsatorna megtelt.",
+    "attachment_invalid": "Ez a melléklet érvénytelen, lejárt vagy nem ehhez a beszélgetéshez tartozik.",
+    "attachment_limit_reached": "Egy üzenethez legfeljebb {max} fájlt csatolhatsz.",
+    "giphy_disabled": "A GIF-keresés jelenleg nincs engedélyezve.",
+    "giphy_unavailable": "A GIPHY most nem érhető el. Próbáld újra később."
   },
   "server": {
     "category_text": "Szöveges csatornák",

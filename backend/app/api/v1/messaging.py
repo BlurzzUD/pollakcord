@@ -16,8 +16,10 @@ MAX_PINS = 50
 
 
 class SendBody(BaseModel):
-    content: str = Field(min_length=1, max_length=8000)
+    content: str = Field(default="", max_length=8000)
     reply_to_id: str | None = Field(default=None, max_length=24)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=10)
+    giphy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]{1,64}$")
 
 
 class ReportBody(BaseModel):

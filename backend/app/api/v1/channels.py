@@ -396,7 +396,10 @@ async def send(
         await enforce_slowmode(db, channel, auth.user.id)
     service = request.app.state.messages
     targets = await mention_targets(db, context, channel, body.content, auth.user.id)
-    message, _ = await service.send(db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=targets)
+    message, _ = await service.send(
+        db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=targets,
+        attachment_ids=[parse_id(value) for value in body.attachment_ids], giphy_id=body.giphy_id,
+    )
     await service.mark_read(db, auth.user.id, scope, message.id)
     payload = (await service.payloads(db, [message], auth.user.id, scope))[0]
     cards = await people.load_cards(db, {auth.user.id})

@@ -85,6 +85,51 @@ describe("api client", () => {
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
   });
+
+  it("sends scoped progress uploads with CSRF and cancels them through AbortSignal", async () => {
+    const instances: FakeUpload[] = [];
+    class FakeUpload {
+      upload: { onprogress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void } = {};
+      headers: Record<string, string> = {};
+      status = 200;
+      responseText = '{"id":"123"}';
+      withCredentials = false;
+      timeout = 0;
+      url = "";
+      onload?: () => void;
+      onabort?: () => void;
+      onerror?: () => void;
+      ontimeout?: () => void;
+      open(_method: string, url: string) { this.url = url; }
+      setRequestHeader(key: string, value: string) { this.headers[key] = value; }
+      send(form: FormData) {
+        expect(form.get("file")).toBeInstanceOf(File);
+        instances.push(this);
+      }
+      abort() { this.onabort?.(); }
+    }
+    fetchMock.mockResolvedValue(json({ csrf_token: "upload-token" }));
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    const progress = vi.fn();
+    const controller = new AbortController();
+    const upload = api.upload("/uploads/attachments", new File(["x"], "x.txt"), { query: { scope: "dm", scope_id: "7" }, onProgress: progress, signal: controller.signal });
+    await vi.waitFor(() => expect(instances).toHaveLength(1));
+    const xhr = instances[0];
+    expect(xhr.url).toBe("/api/v1/uploads/attachments?scope=dm&scope_id=7");
+    expect(xhr.headers["X-CSRF-Token"]).toBe("upload-token");
+    expect(xhr.headers["Content-Type"]).toBeUndefined();
+    expect(xhr.withCredentials).toBe(true);
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
+    expect(progress).toHaveBeenLastCalledWith(50);
+    xhr.onload?.();
+    await expect(upload).resolves.toEqual({ id: "123" });
+    expect(progress).toHaveBeenLastCalledWith(100);
+    const cancelled = api.upload("/uploads/attachments", new File(["x"], "x.txt"), { onProgress: progress, signal: controller.signal });
+    const rejection = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(instances).toHaveLength(2));
+    controller.abort();
+    await rejection;
+  });
 });
 
 class FakeSocket {

@@ -1,0 +1,3418 @@
+diff --git a/.env.example b/.env.example
+index 6c821db..c6e286e 100644
+--- a/.env.example
++++ b/.env.example
+@@ -12,3 +12,10 @@ POLLAKCORD_STUN_URLS=stun:chat.example.hu:3478
+ POLLAKCORD_TURN_URLS=turn:chat.example.hu:3478?transport=udp,turn:chat.example.hu:3478?transport=tcp
+ POLLAKCORD_TURN_SECRET=
+ POLLAKCORD_LOG_LEVEL=INFO
++POLLAKCORD_GIPHY_API_KEY=
++POLLAKCORD_ATTACHMENT_MAX_BYTES=20000000
++POLLAKCORD_ATTACHMENT_ELEVATED_MAX_BYTES=250000000
++POLLAKCORD_ATTACHMENT_HOURLY_BYTES=200000000
++POLLAKCORD_ATTACHMENT_ELEVATED_HOURLY_BYTES=1000000000
++POLLAKCORD_LINK_EMBEDS_ENABLED=true
++POLLAKCORD_LINK_EMBED_TIMEOUT_SECONDS=4
+diff --git a/MEDIA_CHANGESET.md b/MEDIA_CHANGESET.md
+new file mode 100644
+index 0000000..8e68cff
+--- /dev/null
++++ b/MEDIA_CHANGESET.md
+@@ -0,0 +1,89 @@
++# PollákCord media and links change set
++
++## Review map
++
++| Area | Files and behavior |
++| --- | --- |
++| Schema | `models/attachment.py`, nullable media fields on chat/DÖK/class-space messages, additive Alembic `0005_message_media.py` |
++| Uploads | `services/attachments.py`, `services/media_access.py`, `api/v1/uploads.py`: streamed scope-bound storage, role limits, safe authenticated downloads, atomic claims, pending cleanup |
++| Messaging | `services/messages.py`, `services/dok.py`, `services/class_spaces.py`, channel/DM send schemas: encrypted media metadata and cached link embeds |
++| Fetching | `services/link_embeds.py`: bounded HTTP(S), DNS/IP validation and pinning, redirect checks, metadata parsing and thumbnail sanitization |
++| Client | shared `SafeLink`, `MessageMedia`, `GiphyPicker`, `useComposerMedia`, composer/timeline integration, narrow progress-upload extension to the existing CSRF client |
++| Configuration | settings, conditional GIPHY CSP allowances, `.env.example`, hu/en/de UI and error catalogs, CLI cleanup command |
++| Validation | `backend/tests/test_media.py`, `frontend/src/test/media.test.tsx`, existing messaging, permissions, migrations, i18n and no-comments suites; build helper type declaration added for the existing `.mjs` hygiene checker |
++
++
++
++## Behavior and operations
++
++Server chat and direct messages support up to ten attachments and one GIPHY GIF per message, including messages with no text. DÖK and class-space composers remain text-only; their links use the same warning and preview layer. Form text remains inert text, as before.
++
++| Human platform role | Maximum per attachment |
++| --- | --- |
++| `user` | 20,000,000 bytes (20 MB) |
++| `dok_representative`, `dok_president` | 250,000,000 bytes (250 MB) |
++| `school_moderator`, `school_admin` | 250,000,000 bytes (250 MB) |
++
++These limits apply to message attachments; the existing avatar, banner, and server-icon image limits remain in place. Authentication, active/full sessions, CSRF, channel visibility/send permissions, timeouts, and DM privacy/block checks apply before reading an attachment body. Downloads recheck current conversation membership or channel view/history permissions. Elevated platform roles do not bypass these permissions.
++
++All variables below use the `POLLAKCORD_` prefix and appear in `.env.example`:
++
++| Variable | Default | Purpose |
++| --- | --- | --- |
++| `GIPHY_API_KEY` | empty | Enables GIPHY in server/DM composers; absent key hides the picker |
++| `ATTACHMENT_MAX_BYTES` | `20000000` | Normal human per-file limit |
++| `ATTACHMENT_ELEVATED_MAX_BYTES` | `250000000` | Staff and DÖK per-file limit |
++| `ATTACHMENT_HOURLY_BYTES` | `200000000` | Normal user's aggregate uploaded file bytes per hour |
++| `ATTACHMENT_ELEVATED_HOURLY_BYTES` | `1000000000` | Elevated user's aggregate uploaded file bytes per hour |
++| `LINK_EMBEDS_ENABLED` | `true` | Enables bounded server-side link metadata fetches |
++| `LINK_EMBED_TIMEOUT_SECONDS` | `4` | Total preview-fetch budget per message, including images and redirects |
++
++Run `cd backend && alembic upgrade head` before starting this version. Migration `0005` adds the attachments table and nullable encrypted media fields; existing message bodies and metadata remain readable without a data migration.
++
++**Endpoints and storage.** `GET /api/v1/uploads/config` supplies the signed-in user's effective size limit, canonical origin, and optional browser GIPHY key. `POST /api/v1/uploads/attachments?scope=channel|dm&scope_id=...` accepts exactly one multipart `file`. The message send endpoints accept `attachment_ids` and an optional `giphy_id`; attachment IDs must belong to the author and the same scope, be less than 24 hours old, and be unused. Claims are atomic and rolled back with failed sends. `GET /api/v1/uploads/attachments/{id}` requires an active authenticated session and current scope access. `DELETE` at the same path discards only the owner's unattached draft. Deleting a message revokes its attachments.
++
++Files use the existing uploads volume under `attachments/`; this directory is never mounted as static/public content. Bytes are opaque files on disk, consistent with the current media storage policy; filenames and per-message link/GIF metadata are encrypted with the existing vault and row-bound AAD. Image uploads are re-encoded to WebP, with existing pixel/dimension guards and metadata stripping; animated uploaded images use their first frame. Recognized MP4/WebM files may play inline with authenticated HTTP range requests, without transcoding. Other files, including HTML, SVG, and JavaScript, are forced to `application/octet-stream` with attachment disposition even if inline display is requested. Upload responses use `nosniff`, a sandbox CSP, and `no-store`. There is no antivirus scanner in this change.
++
++The per-user request cap is 60 attachment uploads/hour (30 for the elevated tier), plus the byte budgets above. Failed transfers count for bandwidth already received. Limits use the existing in-process limiter; run a shared/distributed limiter before using multiple API workers when a strict cross-worker quota is required. Schedule `cd backend && python -m app.cli cleanup-media` daily to remove expired draft rows and orphaned files older than 24 hours, including files orphaned by account/channel deletion. The frontend also aborts in-flight uploads and discards drafts when leaving a conversation. Back up the entire uploads volume alongside the database and encryption keys.
++
++**Proxy and tunnel configuration.** Every proxy and tunnel on the upload path must accept more than 250,000,000 bytes to leave room for multipart overhead (for example a 260 MB request-body ceiling), with read/write timeouts suitable for slow uploads and enough spool/disk capacity. The bundled Caddyfile does not impose a smaller body ceiling; if you add a [Caddy request_body limit](https://caddyserver.com/docs/caddyfile/directives/request_body), raise `max_size` accordingly. For Nginx, raise `client_max_body_size` (the README example uses `260m`). A larger origin limit cannot override an upstream provider's ceiling. Cloudflare Free/Pro normally impose a 100 MB upload ceiling, so do not assume a 250 MB upload will pass through a Cloudflare proxy or Tunnel; verify the [current plan and zone limits](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/) and arrange a supported configuration before enabling the elevated tier for users.
++
++**GIPHY.** Use a browser API key and obtain the appropriate GIPHY production approval. The authenticated config endpoint intentionally exposes this key to the browser; do not use a privileged server credential. Search and saved-ID lookup call the official GIPHY API directly with `rating=pg`, omit app cookies, and load the original returned media URLs. Only a validated alphanumeric GIF ID is stored with the encrypted message metadata. Recipients resolve the ID again with the PG filter, so removed/restricted GIFs are not replayed from a server cache. The picker and displayed GIF include Powered by GIPHY and creator attribution. The CSP permits only the GIPHY API connection and GIPHY-hosted images in addition to existing sources. This follows [GIPHY's direct-request and no-media-caching guidance](https://developers.giphy.com/docs/api/). If GIPHY, the API key, the school network, or a media URL is unavailable, the message stays readable and a GIF-unavailable label is shown. GIPHY receives the browser's API/media requests; arbitrary link-preview images are handled differently, as below.
++
++**External links and unfurls.** Activating user-supplied HTTP(S) links in chat, DMs, DÖK, class spaces, GIF attribution, or preview cards first opens the same accessible Hungarian/English/German warning dialog. Cancel, Escape, focus trapping, keyboard activation, modifier clicks, and middle clicks are handled. Continue opens a new tab with `noopener noreferrer`; canonical `PUBLIC_ORIGIN` links open normally. Plain form text remains non-clickable.
++
++For new message links, the server fetches at most two previews with a shared four-request concurrency gate and a four-second overall budget. Only HTTP/HTTPS on standard ports is accepted. Local/private/link-local/multicast/metadata addresses, mixed public/private DNS answers, IPv6 transition addresses, credentials in URLs, local names, the app's own origins, and obvious admin/auth routes are rejected. Every redirect is validated again (maximum three); connections are pinned to a validated IP while TLS verification/SNI and Host use the original hostname. Requests carry no cookies, credentials, or browser headers. Documents are limited to 512 KiB, response headers to 16 KiB, and each image to 1 MB; compressed documents are refused. Open Graph/standard title, description, site name, and available image/favicon metadata are saved encrypted with the message. Preview images are fetched through the same SSRF checks, re-encoded, and stored as small WebP data images, so recipients never fetch arbitrary metadata URLs. Failed fetches produce no card or a hostname-only chip; sending still succeeds. Existing messages are not fetched retroactively. Network egress rules blocking internal ranges remain useful defense in depth.
++
++**Bots.** Bot attachment limits, bot message attachment rules, bot API surfaces, and bot UX are deliberately deferred until the bot merge. This change adds only human role/channel/DM policy. The shared size, storage, and metadata helpers are separate from human scope authorization so future bot integration can reuse the storage layer.
++
++
++## Validation (2026-10-15)
++
++| Check | Result |
++| --- | --- |
++| Full frontend suite | 193 passed |
++| Final media/client regression | 27 passed after the final upload-client guard |
++| Production frontend build | Passed (`tsc --noEmit` and Vite) |
++| Frontend comment scan | Passed |
++| Full backend suite | 370 passed; 1 environment-dependent failure |
++| Final backend media regression | 157 passed |
++| Migration/schema agreement and reversible upgrade/downgrade | Passed |
++| Whitespace/error checks | `git diff --check` passed |
++
++Commands:
++
++```sh
++cd frontend
++npm ci
++npm test
++npm run typecheck
++npm run build
++npm run check:comments
++cd ../backend
++python -m pytest tests -q
++python -m pytest tests/test_media.py tests/test_messages.py tests/test_dok.py tests/test_class_spaces.py tests/test_migrations.py tests/test_i18n.py tests/test_security.py -q
++```
++
++The full backend suite's only failure is the pre-existing `tests/test_kreta_integration.py::test_child_process_does_not_inherit_server_secrets`, which reads `/proc/<child pid>/environ`. This sandbox has no procfs entries, so it raises `FileNotFoundError` before its assertion. The same isolated test reproduces the environment failure. No E-Kréta/authentication code or existing tests were changed or disabled. Rerun that test on a Linux host with procfs. The additional teardown warning in the full run follows that interrupted child-process test; the media regression run has no application failures.
++
++No live GIPHY credentials were used: official API behavior and failure paths are mocked in tests. Real production network policy, reverse-proxy upload ceilings, PostgreSQL deployment, and browser video codec support still need deployment validation.
+diff --git a/README.md b/README.md
+index 3a0f06f..9938a64 100644
+--- a/README.md
++++ b/README.md
+@@ -301,7 +301,7 @@ Generate a key: `python -m app generate-key` (from `backend/`).
+ | --- | --- | --- |
+ | `MESSAGE_MAX_LENGTH` | `4000` | Characters per message |
+ | `DATA_KEY_ROTATION_MESSAGES` | `500000` | New data key per conversation/channel after this many messages |
+-| `UPLOAD_DIR` | `<backend>/data/uploads` | Image storage |
++| `UPLOAD_DIR` | `<backend>/data/uploads` | Profile images and private message attachments |
+ | `AVATAR_MAX_BYTES` / `BANNER_MAX_BYTES` / `ICON_MAX_BYTES` | 2 MiB / 6 MiB / 2 MiB | Upload size limits |
+ | `MAX_IMAGE_PIXELS` | `25000000` | Decompression-bomb guard |
+ | `WS_MAX_CONNECTIONS_PER_USER` | `6` | Open sockets per user (tabs/devices) |
+@@ -562,7 +562,7 @@ server {
+     server_name chat.example.hu;
+     ssl_certificate     /etc/letsencrypt/live/chat.example.hu/fullchain.pem;
+     ssl_certificate_key /etc/letsencrypt/live/chat.example.hu/privkey.pem;
+-    client_max_body_size 8m;
++    client_max_body_size 260m;
+ 
+     location / {
+         proxy_pass http://127.0.0.1:8000;
+@@ -765,7 +765,7 @@ Every active class in `school_classes` has a private **class space**: one shared
+ - **One-time prompt.** Until a user answers they are not a member (the safe default). `GET /class-spaces/me` returns `prompt_required: true` for anyone who has a class but no answer for it, so already registered users get a dismissible dialog on their next app load, and new registrations on their first visit to the home screen. Yes or No stores the answer, joins the space and the prompt never comes back; *Later* or closing it only hides it until the next visit. The answer can be changed under Settings, Account.
+ - **Changing class.** `PUT /me/class` removes the membership of the old class in the same transaction, and clearing the class does the same. Old messages stay in the old space and are shown there without a name. The new class needs a fresh answer, and returning to a former class asks again.
+ - **Moderation.** A member can report a message with `POST /class-spaces/{class}/messages/{id}/report`. It creates an ordinary escalated row in `reports` with an encrypted snapshot (the message plus context), so school moderators work from the existing queue, see the real authors, and every view and identity reveal is audited as before. No new reveal path exists. Authors can delete their own messages.
+-- **Encrypted at rest.** Bodies are sealed with AES-256-GCM under `enc/class-space-message` (AAD `cspace|<message id>|<class id>`), and swapped rows fail authentication. Class space messages are not indexed for search and have no reactions, mentions, uploads or notifications. A `class_space.message` WebSocket event (ids only) refreshes open spaces.
++- **Encrypted at rest.** Bodies are sealed with AES-256-GCM under `enc/class-space-message` (AAD `cspace|<message id>|<class id>`), and swapped rows fail authentication. Class space messages are not indexed for search and have no reactions, mentions, uploads or notifications. Their text links share the external-site warning and cached link previews described in section 26. A `class_space.message` WebSocket event (ids only) refreshes open spaces.
+ 
+ API (`/api/v1/class-spaces`): `GET /me`, `PUT /me/visibility`, `GET /{class}/members`, `GET|POST /{class}/messages`, `POST /{class}/read`, `DELETE /{class}/messages/{id}`, `POST /{class}/messages/{id}/report`.
+ 
+@@ -853,7 +853,7 @@ A bulk re-wrap tool is **not** included, so keep old keys as long as old data ex
+ Back up three things, **separately**:
+ 
+ 1. **Database:** `pg_dump -Fc pollakcord` on a schedule (and WAL archiving if you need point-in-time recovery).
+-2. **Uploads:** the `uploads` volume / `POLLAKCORD_UPLOAD_DIR` (avatars, banners, server icons).
++2. **Uploads:** the `uploads` volume / `POLLAKCORD_UPLOAD_DIR` (avatars, banners, server icons, and private message attachments).
+ 3. **Secrets:** `MASTER_KEY`, `PREVIOUS_MASTER_KEYS`, `PEPPER` in a password manager or secret store, **not** next to the database backup.
+ 
+ Remember:
+@@ -937,7 +937,7 @@ Frontend tests: translation key/placeholder parity and coverage of every used ke
+ 
+ ### Status at packaging time
+ 
+-The complete backend suite passed at its last full run (248 tests; one further test was added afterwards and passed on its own), the frontend suite passed (56 tests), and the production frontend build succeeded. The class-space suites (`backend/tests/test_class_spaces.py`, `frontend/src/test/classSpace.test.tsx`) and the forms suites (`backend/tests/test_forms.py`, `frontend/src/test/forms.test.tsx`) were added afterwards in an environment without package installation, so they have not been run yet; run both suites, `npm run typecheck` and `npm run build` before merging. No automated tests exercise PostgreSQL, a real TURN server, real browsers' WebRTC stacks or the live E-Kréta service; test those in staging.
++The media/link change set passed 193 frontend tests, the production TypeScript/Vite build, and the no-comments check. The full backend run passed 370 tests; the existing `test_child_process_does_not_inherit_server_secrets` test failed because this execution environment has no `/proc/<pid>/environ`. Its code and the E-Kréta/authentication code were left unchanged. The final focused backend regression run passed all 157 tests, including real streamed 20 MB/250 MB boundaries for every human role, permissions, safe downloads, SSRF/failures, messaging, DÖK/class-space anonymity, migrations, translations, and source hygiene. See `MEDIA_CHANGESET.md` for exact commands and the environment limitation.
+ 
+ ---
+ 
+@@ -966,3 +966,32 @@ The complete backend suite passed at its last full run (248 tests; one further t
+ | Locked out after failed logins | Wait for the delay shown, or recover through E-Kréta or a recovery code |
+ 
+ Logs are JSON on stdout (`docker compose logs -f api`). Each request has an `X-Request-ID`; search for it to follow one request. Raise detail with `POLLAKCORD_LOG_LEVEL=DEBUG` (secrets stay redacted).
++
++
++## 26. Message media and external links
++
++Server chat and DMs support ten private attachments and one GIPHY GIF per message, with upload progress. DÖK and class-space composers remain text-only and share link previews/warnings. Form text remains inert. Run `cd backend && alembic upgrade head` to apply additive migration `0005` before starting this version. See [MEDIA_CHANGESET.md](MEDIA_CHANGESET.md) for endpoints, security choices, storage cleanup, and validation.
++
++| Human platform role | Per-file limit |
++| --- | --- |
++| `user` | 20,000,000 bytes (20 MB) |
++| `dok_representative`, `dok_president`, `school_moderator`, `school_admin` | 250,000,000 bytes (250 MB) |
++
++The server enforces the current user's role and channel/DM permissions. Existing avatar/banner/icon limits remain in place. All attachment downloads require authentication and current scope access. Images are sanitized; other files download with attachment disposition, `nosniff`, and a sandbox CSP. Recognized MP4/WebM can play inline. Files reuse the uploads volume; schedule `cd backend && python -m app.cli cleanup-media` daily for expired drafts/orphans.
++
++All variables have the `POLLAKCORD_` prefix; `.env.example` includes them:
++
++| Variable | Default |
++| --- | --- |
++| `GIPHY_API_KEY` | empty: picker hidden |
++| `ATTACHMENT_MAX_BYTES` / `ATTACHMENT_ELEVATED_MAX_BYTES` | `20000000` / `250000000` |
++| `ATTACHMENT_HOURLY_BYTES` / `ATTACHMENT_ELEVATED_HOURLY_BYTES` | `200000000` / `1000000000` |
++| `LINK_EMBEDS_ENABLED` / `LINK_EMBED_TIMEOUT_SECONDS` | `true` / `4` |
++
++GIPHY uses a browser key, official direct browser requests, a PG filter, and attribution. Only GIF IDs are saved, with encrypted message metadata; media URLs are resolved again rather than cached/re-hosted, following [GIPHY guidance](https://developers.giphy.com/docs/api/). A missing key hides the picker; failed or removed GIFs show an unavailable label while the message remains readable. The key is intentionally visible to authenticated browsers; use an appropriate browser key and production approval.
++
++External HTTP(S) links and preview cards require confirmation before opening a new tab with `noopener noreferrer`. Canonical `PUBLIC_ORIGIN` links open normally. The server stores encrypted previews and sanitized thumbnails, with public-IP validation and DNS pinning, checks on every redirect, bounded bytes/time, and no cookies. Private/internal/app/admin URLs are skipped. Preview failures never block sending.
++
++**Operations:** every reverse proxy/tunnel must permit more than 250 MB plus multipart overhead, with suitable timeouts and spool/disk space. Raise any [Caddy `request_body max_size`](https://caddyserver.com/docs/caddyfile/directives/request_body) limit or Nginx `client_max_body_size` to at least 260 MB. Cloudflare Free/Pro normally have a 100 MB ceiling: verify [plan and zone limits](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/); changing the origin alone cannot make 250 MB pass. Per-user limits use the existing in-process limiter, with 60 uploads/hour (30 elevated) and the byte budgets above.
++
++**Bots:** bot attachment quotas, APIs, and UX are deliberately deferred until the bot merge. Human policy is separate from shared storage/metadata helpers for later reuse.
+diff --git a/backend/app/api/v1/channels.py b/backend/app/api/v1/channels.py
+index b382134..99a4501 100644
+--- a/backend/app/api/v1/channels.py
++++ b/backend/app/api/v1/channels.py
+@@ -396,7 +396,10 @@ async def send(
+         await enforce_slowmode(db, channel, auth.user.id)
+     service = request.app.state.messages
+     targets = await mention_targets(db, context, channel, body.content, auth.user.id)
+-    message, _ = await service.send(db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=targets)
++    message, _ = await service.send(
++        db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=targets,
++        attachment_ids=[parse_id(value) for value in body.attachment_ids], giphy_id=body.giphy_id,
++    )
+     await service.mark_read(db, auth.user.id, scope, message.id)
+     payload = (await service.payloads(db, [message], auth.user.id, scope))[0]
+     cards = await people.load_cards(db, {auth.user.id})
+diff --git a/backend/app/api/v1/dms.py b/backend/app/api/v1/dms.py
+index e42147f..ea91b35 100644
+--- a/backend/app/api/v1/dms.py
++++ b/backend/app/api/v1/dms.py
+@@ -143,7 +143,10 @@ async def send(
+     service = request.app.state.messages
+     scope = MessageScope(ScopeKind.DM, conversation_id)
+     mentions = {other_id} & extract_mentions(body.content)
+-    message, _ = await service.send(db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=mentions)
++    message, _ = await service.send(
++        db, scope, auth.user.id, body.content, reply_to_id=parse_id(body.reply_to_id), mentions=mentions,
++        attachment_ids=[parse_id(value) for value in body.attachment_ids], giphy_id=body.giphy_id,
++    )
+     conversation.last_message_at = utcnow()
+     await service.mark_read(db, auth.user.id, scope, message.id)
+     payload = (await service.payloads(db, [message], auth.user.id, scope))[0]
+diff --git a/backend/app/api/v1/messaging.py b/backend/app/api/v1/messaging.py
+index f80c873..b8a2c1c 100644
+--- a/backend/app/api/v1/messaging.py
++++ b/backend/app/api/v1/messaging.py
+@@ -16,8 +16,10 @@ MAX_PINS = 50
+ 
+ 
+ class SendBody(BaseModel):
+-    content: str = Field(min_length=1, max_length=8000)
++    content: str = Field(default="", max_length=8000)
+     reply_to_id: str | None = Field(default=None, max_length=24)
++    attachment_ids: list[str] = Field(default_factory=list, max_length=10)
++    giphy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]{1,64}$")
+ 
+ 
+ class ReportBody(BaseModel):
+diff --git a/backend/app/api/v1/meta.py b/backend/app/api/v1/meta.py
+index 9c68708..3d7475b 100644
+--- a/backend/app/api/v1/meta.py
++++ b/backend/app/api/v1/meta.py
+@@ -12,6 +12,7 @@ async def meta(request: Request) -> dict:
+     settings = request.app.state.settings
+     return {
+         "app_name": settings.app_name,
++        "public_origin": settings.public_origin,
+         "reactions": list(ALLOWED_REACTIONS),
+         "permissions": list(PERMISSION_NAMES),
+         "report_reasons": list(REPORT_REASONS),
+diff --git a/backend/app/api/v1/uploads.py b/backend/app/api/v1/uploads.py
+index 476979e..41a780c 100644
+--- a/backend/app/api/v1/uploads.py
++++ b/backend/app/api/v1/uploads.py
+@@ -1,9 +1,17 @@
+-from fastapi import APIRouter, Depends, File, Request, UploadFile
++from typing import Literal
++
++from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
++from fastapi.responses import FileResponse
++from sqlalchemy import delete
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+-from ...models import Profile
++from ...db.types import utcnow
++from ...errors import AppError
++from ...models import Attachment, Message, Profile
+ from ...security.ratelimit import enforce
+ from ...services import uploads
++from ...services.attachments import ELEVATED_ROLES, MAX_ATTACHMENTS, PENDING_LIFETIME, attachment_limit, attachment_payload, blob_path, check_size, parse_upload, store_attachment
++from ...services.media_access import require_media_scope
+ from ...services.accounts import load_self_payload
+ from ..deps import Auth, get_db, get_settings, require_auth
+ 
+@@ -11,6 +19,92 @@ router = APIRouter(prefix="/uploads", tags=["uploads"])
+ PROFILE_FIELDS = {"avatar": "avatar_key", "banner": "banner_key"}
+ 
+ 
++@router.get("/config")
++async def media_config(request: Request, auth: Auth = Depends(require_auth)) -> dict:
++    settings = get_settings(request)
++    key = settings.giphy_api_key.get_secret_value().strip() if settings.giphy_api_key else ""
++    return {
++        "public_origin": settings.public_origin,
++        "max_attachment_bytes": attachment_limit(settings, auth.user.platform_role),
++        "max_attachments": MAX_ATTACHMENTS,
++        "giphy_api_key": key or None,
++        "giphy_rating": "pg",
++    }
++
++
++@router.post("/attachments")
++async def upload_attachment(
++    request: Request, scope: Literal["channel", "dm"], scope_id: int = Query(gt=0, lt=2**63),
++    auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db),
++) -> dict:
++    await require_media_scope(db, auth.user, scope, scope_id, write=True)
++    settings = get_settings(request)
++    limit = attachment_limit(settings, auth.user.platform_role)
++    enforce(request, "attachment-upload", 30 if auth.user.platform_role in ELEVATED_ROLES else 60, 3600, subject=str(auth.user.id))
++    if declared := request.headers.get("content-length"):
++        try:
++            check_size(int(declared), limit + 65536)
++        except ValueError as exc:
++            raise AppError("attachment_invalid", 422) from exc
++    form, file = await parse_upload(request, auth.user, limit)
++    row = None
++    try:
++        row = await store_attachment(db, request.app.state.vault, settings, auth.user, scope, scope_id, file)
++        await db.commit()
++        return attachment_payload(request.app.state.vault, row)
++    except BaseException:
++        if row is not None:
++            blob_path(settings, row.storage_key).unlink(missing_ok=True)
++        raise
++    finally:
++        await form.close()
++
++
++@router.get("/attachments/{attachment_id}")
++async def download_attachment(
++    attachment_id: int, request: Request, inline: bool = False,
++    auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db),
++) -> FileResponse:
++    row = await db.get(Attachment, attachment_id) if 0 < attachment_id < 2**63 else None
++    if row is None:
++        raise AppError("not_found", 404)
++    pending = row.message_id is None
++    if pending and (row.owner_id != auth.user.id or row.created_at <= utcnow() - PENDING_LIFETIME):
++        raise AppError("not_found", 404)
++    if not pending:
++        message = await db.get(Message, row.message_id)
++        if message is None or message.deleted_at is not None:
++            raise AppError("not_found", 404)
++    scope = "channel" if row.channel_id is not None else "dm"
++    await require_media_scope(db, auth.user, scope, row.channel_id if scope == "channel" else row.conversation_id, write=pending)
++    path = blob_path(get_settings(request), row.storage_key)
++    if not path.is_file():
++        raise AppError("not_found", 404)
++    safe_inline = inline and row.kind in ("image", "video")
++    payload = attachment_payload(request.app.state.vault, row)
++    return FileResponse(
++        path, filename=payload["filename"], media_type=row.mime_type if safe_inline else "application/octet-stream",
++        content_disposition_type="inline" if safe_inline else "attachment",
++        headers={"Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; sandbox", "X-Content-Type-Options": "nosniff"},
++    )
++
++
++@router.delete("/attachments/{attachment_id}")
++async def discard_attachment(
++    attachment_id: int, request: Request, auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db),
++) -> dict:
++    row = await db.get(Attachment, attachment_id) if 0 < attachment_id < 2**63 else None
++    if row is None or row.owner_id != auth.user.id or row.message_id is not None:
++        raise AppError("not_found", 404)
++    path = blob_path(get_settings(request), row.storage_key)
++    removed = await db.execute(delete(Attachment).where(Attachment.id == row.id, Attachment.owner_id == auth.user.id, Attachment.message_id.is_(None)))
++    if removed.rowcount != 1:
++        raise AppError("not_found", 404)
++    await db.commit()
++    path.unlink(missing_ok=True)
++    return {"status": "deleted"}
++
++
+ @router.post("/{kind}")
+ async def upload_profile_image(
+     kind: str, request: Request, file: UploadFile = File(...), auth: Auth = Depends(require_auth), db: AsyncSession = Depends(get_db)
+diff --git a/backend/app/cli.py b/backend/app/cli.py
+index b00c260..267ad85 100644
+--- a/backend/app/cli.py
++++ b/backend/app/cli.py
+@@ -10,6 +10,7 @@ from .db.session import build_engine, build_session_factory
+ from .models import User
+ from .models.enums import PlatformRole
+ from .seed import ensure_school_classes
++from .services.attachments import cleanup_attachments
+ 
+ 
+ async def grant_role(username: str, role: str) -> int:
+@@ -42,11 +43,24 @@ async def seed() -> int:
+     return 0
+ 
+ 
++async def cleanup_media() -> int:
++    settings = get_settings()
++    engine = build_engine(settings)
++    try:
++        async with build_session_factory(engine)() as db:
++            removed = await cleanup_attachments(db, settings)
++        print(f"removed {removed} expired or orphaned attachment files")
++    finally:
++        await engine.dispose()
++    return 0
++
++
+ def main() -> int:
+     parser = argparse.ArgumentParser(prog="pollakcord")
+     sub = parser.add_subparsers(dest="command", required=True)
+     sub.add_parser("generate-key")
+     sub.add_parser("seed")
++    sub.add_parser("cleanup-media")
+     grant = sub.add_parser("grant-role")
+     grant.add_argument("username")
+     grant.add_argument("role", choices=[r.value for r in PlatformRole])
+@@ -56,6 +70,8 @@ def main() -> int:
+         return 0
+     if args.command == "seed":
+         return asyncio.run(seed())
++    if args.command == "cleanup-media":
++        return asyncio.run(cleanup_media())
+     return asyncio.run(grant_role(args.username, args.role))
+ 
+ 
+diff --git a/backend/app/config.py b/backend/app/config.py
+index ffcb9ea..4dac2a5 100644
+--- a/backend/app/config.py
++++ b/backend/app/config.py
+@@ -2,7 +2,7 @@ from functools import lru_cache
+ from pathlib import Path
+ from typing import Literal
+ 
+-from pydantic import SecretStr
++from pydantic import Field, SecretStr
+ from pydantic_settings import BaseSettings, SettingsConfigDict
+ 
+ BASE_DIR = Path(__file__).resolve().parent.parent
+@@ -58,6 +58,13 @@ class Settings(BaseSettings):
+     banner_max_bytes: int = 6 * 1024 * 1024
+     icon_max_bytes: int = 2 * 1024 * 1024
+     max_image_pixels: int = 25_000_000
++    attachment_max_bytes: int = Field(default=20_000_000, gt=0)
++    attachment_elevated_max_bytes: int = Field(default=250_000_000, gt=0)
++    attachment_hourly_bytes: int = Field(default=200_000_000, gt=0)
++    attachment_elevated_hourly_bytes: int = Field(default=1_000_000_000, gt=0)
++    giphy_api_key: SecretStr | None = None
++    link_embeds_enabled: bool = True
++    link_embed_timeout_seconds: float = Field(default=4.0, gt=0, le=15)
+ 
+     message_max_length: int = 4000
+     data_key_rotation_messages: int = 500_000
+diff --git a/backend/app/locales/de.json b/backend/app/locales/de.json
+index 041c1f9..ebb6bc6 100644
+--- a/backend/app/locales/de.json
++++ b/backend/app/locales/de.json
+@@ -114,7 +114,11 @@
+     "username_reserved": "Dieser Benutzername ist reserviert.",
+     "username_taken": "Dieser Benutzername ist bereits vergeben.",
+     "validation_error": "Die übermittelten Daten sind ungültig.",
+-    "voice_channel_full": "Der Sprachkanal ist voll."
++    "voice_channel_full": "Der Sprachkanal ist voll.",
++    "attachment_invalid": "Dieser Anhang ist ungültig, abgelaufen oder gehört zu einem anderen Gespräch.",
++    "attachment_limit_reached": "Du kannst bis zu {max} Dateien an eine Nachricht anhängen.",
++    "giphy_disabled": "Die GIF-Suche ist derzeit deaktiviert.",
++    "giphy_unavailable": "GIPHY ist momentan nicht erreichbar. Versuche es später erneut."
+   },
+   "server": {
+     "category_text": "Textkanäle",
+diff --git a/backend/app/locales/en.json b/backend/app/locales/en.json
+index f8e50d0..a18884c 100644
+--- a/backend/app/locales/en.json
++++ b/backend/app/locales/en.json
+@@ -114,7 +114,11 @@
+     "username_reserved": "This username is reserved.",
+     "username_taken": "This username is already taken.",
+     "validation_error": "The submitted data is invalid.",
+-    "voice_channel_full": "The voice channel is full."
++    "voice_channel_full": "The voice channel is full.",
++    "attachment_invalid": "This attachment is invalid, expired, or belongs to a different conversation.",
++    "attachment_limit_reached": "You can attach up to {max} files to a message.",
++    "giphy_disabled": "GIF search is currently disabled.",
++    "giphy_unavailable": "GIPHY is unavailable. Please try again later."
+   },
+   "server": {
+     "category_text": "Text channels",
+diff --git a/backend/app/locales/hu.json b/backend/app/locales/hu.json
+index f53a28f..a9b22b7 100644
+--- a/backend/app/locales/hu.json
++++ b/backend/app/locales/hu.json
+@@ -114,7 +114,11 @@
+     "username_reserved": "Ez a felhasználónév le van foglalva.",
+     "username_taken": "Ez a felhasználónév már foglalt.",
+     "validation_error": "A megadott adatok érvénytelenek.",
+-    "voice_channel_full": "A hangcsatorna megtelt."
++    "voice_channel_full": "A hangcsatorna megtelt.",
++    "attachment_invalid": "Ez a melléklet érvénytelen, lejárt vagy nem ehhez a beszélgetéshez tartozik.",
++    "attachment_limit_reached": "Egy üzenethez legfeljebb {max} fájlt csatolhatsz.",
++    "giphy_disabled": "A GIF-keresés jelenleg nincs engedélyezve.",
++    "giphy_unavailable": "A GIPHY most nem érhető el. Próbáld újra később."
+   },
+   "server": {
+     "category_text": "Szöveges csatornák",
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 8348d0d..07b4f80 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -25,6 +25,7 @@ from .services.class_spaces import ClassSpaceService
+ from .services.dok import DokService
+ from .services.forms import FormService
+ from .services.messages import MessageService
++from .services.link_embeds import EmbedService
+ from .services.uploads import media_path
+ from .spa import mount_frontend
+ 
+@@ -67,10 +68,11 @@ def create_app(settings: Settings | None = None, kreta_adapter: KretaAuthPort |
+         app.state.limiter = RateLimiter(settings.rate_limit_enabled)
+         app.state.hub = hub
+         app.state.voice = VoiceManager(settings.voice_max_participants)
+-        app.state.messages = MessageService(vault, settings)
+-        app.state.dok = DokService(vault, settings)
++        embeds = EmbedService(settings)
++        app.state.messages = MessageService(vault, settings, embeds)
++        app.state.dok = DokService(vault, settings, embeds)
+         app.state.forms = FormService(vault)
+-        app.state.class_spaces = ClassSpaceService(vault, settings)
++        app.state.class_spaces = ClassSpaceService(vault, settings, embeds)
+         app.state.kreta_flows = flows
+         from .realtime.ws import install_revalidator
+ 
+diff --git a/backend/app/models/__init__.py b/backend/app/models/__init__.py
+index 3bb00b0..99d1867 100644
+--- a/backend/app/models/__init__.py
++++ b/backend/app/models/__init__.py
+@@ -1,4 +1,5 @@
+ from .audit import AuditLog, Notification
++from .attachment import Attachment
+ from .auth import AuthMethod, AuthSession, RecoveryCode, TotpConfig
+ from .class_space import ClassSpaceMember, ClassSpaceMessage
+ from .dok import DokMessage, DokThread
+@@ -29,6 +30,7 @@ from .social import Block, FriendRequest, Friendship
+ from .user import Profile, SchoolClass, Theme, User, UserIdentity, UserSettings
+ 
+ __all__ = [
++    "Attachment",
+     "AuditLog",
+     "AuthMethod",
+     "AuthSession",
+diff --git a/backend/app/models/attachment.py b/backend/app/models/attachment.py
+new file mode 100644
+index 0000000..763f125
+--- /dev/null
++++ b/backend/app/models/attachment.py
+@@ -0,0 +1,29 @@
++from datetime import datetime
++
++from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, LargeBinary, String
++from sqlalchemy.orm import Mapped, mapped_column
++
++from ..db.base import Base, created_column, id_column
++
++
++class Attachment(Base):
++    __tablename__ = "attachments"
++    __table_args__ = (
++        CheckConstraint(
++            "(channel_id IS NOT NULL AND conversation_id IS NULL) OR (channel_id IS NULL AND conversation_id IS NOT NULL)",
++            name="single_scope",
++        ),
++    )
++
++    id: Mapped[int] = id_column()
++    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
++    channel_id: Mapped[int | None] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), nullable=True)
++    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
++    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), nullable=True, index=True)
++    storage_key: Mapped[str] = mapped_column(String(32), unique=True)
++    size_bytes: Mapped[int] = mapped_column(BigInteger)
++    mime_type: Mapped[str] = mapped_column(String(100))
++    kind: Mapped[str] = mapped_column(String(8))
++    metadata_enc: Mapped[bytes] = mapped_column(LargeBinary)
++    key_id: Mapped[str] = mapped_column(String(16))
++    created_at: Mapped[datetime] = created_column()
+diff --git a/backend/app/models/class_space.py b/backend/app/models/class_space.py
+index de88fc4..0cc6fa7 100644
+--- a/backend/app/models/class_space.py
++++ b/backend/app/models/class_space.py
+@@ -24,5 +24,7 @@ class ClassSpaceMessage(Base):
+     author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+     author_visible: Mapped[bool] = mapped_column(Boolean, default=False)
+     body_enc: Mapped[bytes] = mapped_column(LargeBinary)
++    media_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
++    media_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+     key_id: Mapped[str] = mapped_column(String(16))
+     created_at: Mapped[datetime] = created_column()
+diff --git a/backend/app/models/dok.py b/backend/app/models/dok.py
+index 8ee3cc7..ab90035 100644
+--- a/backend/app/models/dok.py
++++ b/backend/app/models/dok.py
+@@ -28,5 +28,7 @@ class DokMessage(Base):
+     author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+     author_role: Mapped[str] = mapped_column(String(24))
+     body_enc: Mapped[bytes] = mapped_column(LargeBinary)
++    media_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
++    media_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+     key_id: Mapped[str] = mapped_column(String(16))
+     created_at: Mapped[datetime] = created_column()
+diff --git a/backend/app/models/message.py b/backend/app/models/message.py
+index 2046694..a814f82 100644
+--- a/backend/app/models/message.py
++++ b/backend/app/models/message.py
+@@ -66,6 +66,8 @@ class Message(Base):
+     deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+     pinned_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+     pinned_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
++    media_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
++    media_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+ 
+ 
+ class MessageContent(Base):
+diff --git a/backend/app/security/middleware.py b/backend/app/security/middleware.py
+index 6da8c21..22f3149 100644
+--- a/backend/app/security/middleware.py
++++ b/backend/app/security/middleware.py
+@@ -21,15 +21,16 @@ def build_csp(settings: Settings) -> str:
+     parsed = urlparse(settings.public_origin)
+     websocket_scheme = "wss" if parsed.scheme == "https" else "ws"
+     websocket_origin = f"{websocket_scheme}://{parsed.netloc}"
++    giphy_enabled = bool(settings.giphy_api_key and settings.giphy_api_key.get_secret_value().strip())
+     return "; ".join(
+         [
+             "default-src 'self'",
+             "script-src 'self'",
+             "style-src 'self' 'unsafe-inline'",
+-            "img-src 'self' data: blob:",
++            "img-src 'self' data: blob:" + (" https://*.giphy.com" if giphy_enabled else ""),
+             "font-src 'self'",
+             "media-src 'self' blob:",
+-            f"connect-src 'self' {websocket_origin}",
++            f"connect-src 'self' {websocket_origin}" + (" https://api.giphy.com" if giphy_enabled else ""),
+             "object-src 'none'",
+             "base-uri 'none'",
+             "form-action 'self'",
+diff --git a/backend/app/security/ratelimit.py b/backend/app/security/ratelimit.py
+index db8c1c2..cb35f3b 100644
+--- a/backend/app/security/ratelimit.py
++++ b/backend/app/security/ratelimit.py
+@@ -11,6 +11,7 @@ class RateLimiter:
+     def __init__(self, enabled: bool = True) -> None:
+         self.enabled = enabled
+         self._hits: dict[str, deque[float]] = {}
++        self._weighted_hits: dict[str, deque[tuple[float, int]]] = {}
+         self._last_cleanup = time.monotonic()
+ 
+     def check(self, key: str, limit: int, window: float) -> float | None:
+@@ -29,6 +30,23 @@ class RateLimiter:
+     def reset(self, key: str) -> None:
+         self._hits.pop(key, None)
+ 
++    def check_weight(self, key: str, weight: int, limit: int, window: float) -> float | None:
++        if not self.enabled:
++            return None
++        now = time.monotonic()
++        bucket = self._weighted_hits.setdefault(key, deque())
++        while bucket and bucket[0][0] <= now - window:
++            bucket.popleft()
++        if sum(amount for _, amount in bucket) + weight > limit:
++            return max(1.0, window - (now - bucket[0][0])) if bucket else window
++        if bucket and now - bucket[-1][0] < 1:
++            stamp, amount = bucket.pop()
++            bucket.append((stamp, amount + weight))
++        else:
++            bucket.append((now, weight))
++        self._cleanup(now, window)
++        return None
++
+     def _cleanup(self, now: float, window: float) -> None:
+         if now - self._last_cleanup < 60:
+             return
+@@ -36,6 +54,8 @@ class RateLimiter:
+         stale = [k for k, bucket in self._hits.items() if not bucket or bucket[-1] <= now - max(window, 3600)]
+         for key in stale:
+             del self._hits[key]
++        for key in [k for k, bucket in self._weighted_hits.items() if not bucket or bucket[-1][0] <= now - max(window, 3600)]:
++            del self._weighted_hits[key]
+ 
+ 
+ def enforce(request: Request, name: str, limit: int, window: float, subject: str | None = None) -> None:
+diff --git a/backend/app/services/attachments.py b/backend/app/services/attachments.py
+new file mode 100644
+index 0000000..8afd586
+--- /dev/null
++++ b/backend/app/services/attachments.py
+@@ -0,0 +1,230 @@
++import asyncio
++import json
++import mimetypes
++import re
++import secrets
++from datetime import timedelta
++from pathlib import Path
++
++from fastapi import Request
++from sqlalchemy import delete, select, update
++from sqlalchemy.ext.asyncio import AsyncSession
++from starlette.datastructures import UploadFile
++from starlette.formparsers import MultiPartException, MultiPartParser
++from python_multipart.exceptions import FormParserError
++
++from ..config import Settings
++from ..crypto.envelope import DecryptionError, Vault
++from ..db.types import utcnow
++from ..errors import AppError
++from ..ids import new_id
++from ..models import Attachment, User
++from ..models.enums import PlatformRole
++from .uploads import ImageSpec, media_directory, transform_image
++
++ELEVATED_ROLES = frozenset({
++    PlatformRole.DOK_REPRESENTATIVE.value, PlatformRole.DOK_PRESIDENT.value,
++    PlatformRole.SCHOOL_MODERATOR.value, PlatformRole.SCHOOL_ADMIN.value,
++})
++MAX_ATTACHMENTS = 10
++PENDING_LIFETIME = timedelta(hours=24)
++STORAGE_KEY = re.compile(r"^[0-9a-f]{32}$")
++IMAGE_SPEC = ImageSpec("attachment_max_bytes", 1, 1, 16384, (2560, 2560), False)
++
++
++def attachment_limit(settings: Settings, role: str) -> int:
++    return settings.attachment_elevated_max_bytes if role in ELEVATED_ROLES else settings.attachment_max_bytes
++
++
++def check_size(size: int, limit: int) -> None:
++    if size > limit:
++        raise AppError("file_too_large", 413, params={"max_bytes": limit})
++
++
++def charge_upload(request: Request, user: User, amount: int) -> None:
++    settings = request.app.state.settings
++    limit = settings.attachment_elevated_hourly_bytes if user.platform_role in ELEVATED_ROLES else settings.attachment_hourly_bytes
++    retry = request.app.state.limiter.check_weight(f"attachment-bytes:{user.id}", amount, limit, 3600)
++    if retry is not None:
++        seconds = int(retry) + 1
++        raise AppError("rate_limited", 429, params={"seconds": seconds}, headers={"Retry-After": str(seconds)})
++
++
++async def parse_upload(request: Request, user: User, limit: int):
++    if not request.headers.get("content-type", "").lower().startswith("multipart/form-data;"):
++        raise AppError("attachment_invalid", 422)
++    async def bounded_stream():
++        received = 0
++        async for chunk in request.stream():
++            received += len(chunk)
++            check_size(received, limit + 65536)
++            yield chunk
++
++    class AttachmentParser(MultiPartParser):
++        file_bytes = 0
++
++        def on_part_data(self, data: bytes, start: int, end: int) -> None:
++            if self._current_part.file is not None:
++                self.file_bytes += end - start
++                check_size(self.file_bytes, limit)
++                charge_upload(request, user, end - start)
++            super().on_part_data(data, start, end)
++
++    parser = AttachmentParser(request.headers, bounded_stream(), max_files=1, max_fields=0, max_part_size=65536)
++    try:
++        form = await parser.parse()
++    except BaseException as exc:
++        for handle in parser._files_to_close_on_error:
++            handle.close()
++        if isinstance(exc, (MultiPartException, FormParserError)):
++            raise AppError("attachment_invalid", 422) from exc
++        raise
++    file = form.get("file")
++    if len(form.multi_items()) != 1 or not isinstance(file, UploadFile):
++        await form.close()
++        raise AppError("attachment_invalid", 422)
++    return form, file
++
++
++def blob_path(settings: Settings, key: str) -> Path:
++    if not STORAGE_KEY.fullmatch(key):
++        raise AppError("not_found", 404)
++    return settings.upload_dir / "attachments" / key
++
++
++def safe_filename(value: str | None) -> str:
++    name = (value or "file").replace("\\", "/").rsplit("/", 1)[-1]
++    return "".join(ch for ch in name if ch.isprintable() and ord(ch) not in range(0x202A, 0x202F) and ord(ch) not in range(0x2066, 0x206A))[:240] or "file"
++
++
++def image_extension(header: bytes) -> str | None:
++    if header.startswith(b"\x89PNG\r\n\x1a\n"):
++        return "png"
++    if header.startswith(b"\xff\xd8\xff"):
++        return "jpg"
++    if header.startswith((b"GIF87a", b"GIF89a")):
++        return "gif"
++    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
++        return "webp"
++    return None
++
++
++def detect_type(header: bytes, filename: str) -> tuple[str, str]:
++    if len(header) >= 12 and header[4:8] == b"ftyp":
++        brands = header[8:12]
++        if brands in (b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4V "):
++            return "video/mp4", "video"
++    if header.startswith(b"\x1aE\xdf\xa3") and b"webm" in header[:512]:
++        return "video/webm", "video"
++    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
++    return mime[:100], "file"
++
++
++def _store_file(upload: UploadFile, settings: Settings, limit: int, filename: str) -> tuple[str, int, str, str]:
++    key = secrets.token_hex(16)
++    path = media_directory(settings, "attachments") / key
++    try:
++        upload.file.seek(0)
++        size = 0
++        header = b""
++        with path.open("xb") as output:
++            while chunk := upload.file.read(1024 * 1024):
++                size += len(chunk)
++                check_size(size, limit)
++                if not header:
++                    header = chunk[:512]
++                output.write(chunk)
++        if not size:
++            raise AppError("file_empty", 422)
++        extension = image_extension(header)
++        if extension:
++            data = transform_image(path.read_bytes(), IMAGE_SPEC, extension, settings.max_image_pixels)
++            check_size(len(data), limit)
++            path.write_bytes(data)
++            return key, len(data), "image/webp", "image"
++        mime, kind = detect_type(header, filename)
++        return key, size, mime, kind
++    except BaseException:
++        path.unlink(missing_ok=True)
++        raise
++
++
++async def store_attachment(db: AsyncSession, vault: Vault, settings: Settings, user: User, scope: str, scope_id: int, upload: UploadFile) -> Attachment:
++    filename = safe_filename(upload.filename)
++    key, size, mime, kind = await asyncio.to_thread(_store_file, upload, settings, attachment_limit(settings, user.platform_role), filename)
++    attachment_id = new_id()
++    metadata, key_id = vault.encrypt("attachment", json.dumps({"filename": filename}, ensure_ascii=False).encode(), f"attachment|{attachment_id}".encode())
++    row = Attachment(
++        id=attachment_id, owner_id=user.id, channel_id=scope_id if scope == "channel" else None,
++        conversation_id=scope_id if scope == "dm" else None, storage_key=key, size_bytes=size,
++        mime_type=mime, kind=kind, metadata_enc=metadata, key_id=key_id,
++    )
++    try:
++        db.add(row)
++        await db.flush()
++    except BaseException:
++        blob_path(settings, key).unlink(missing_ok=True)
++        raise
++    return row
++
++
++def attachment_payload(vault: Vault, row: Attachment) -> dict:
++    try:
++        metadata = json.loads(vault.decrypt("attachment", row.metadata_enc, f"attachment|{row.id}".encode(), row.key_id))
++        filename = metadata["filename"]
++    except (DecryptionError, ValueError, KeyError):
++        filename = "file"
++    return {
++        "id": str(row.id), "filename": filename, "size_bytes": row.size_bytes, "mime_type": row.mime_type,
++        "kind": row.kind, "url": f"/api/v1/uploads/attachments/{row.id}",
++    }
++
++
++async def claim_attachments(db: AsyncSession, ids: list[int], author_id: int, scope: str, scope_id: int, message_id: int) -> None:
++    if len(ids) > MAX_ATTACHMENTS or len(set(ids)) != len(ids) or any(not 0 < value < 2**63 for value in ids):
++        raise AppError("attachment_invalid", 422)
++    if not ids:
++        return
++    clause = Attachment.channel_id == scope_id if scope == "channel" else Attachment.conversation_id == scope_id
++    result = await db.execute(
++        update(Attachment).where(
++            Attachment.id.in_(ids), Attachment.owner_id == author_id, clause,
++            Attachment.message_id.is_(None), Attachment.created_at > utcnow() - PENDING_LIFETIME,
++        ).values(message_id=message_id)
++    )
++    if result.rowcount != len(ids):
++        raise AppError("attachment_invalid", 422)
++
++
++async def attachments_for(db: AsyncSession, vault: Vault, message_ids: list[int]) -> dict[int, list[dict]]:
++    grouped: dict[int, list[dict]] = {}
++    if message_ids:
++        rows = (await db.execute(select(Attachment).where(Attachment.message_id.in_(message_ids)).order_by(Attachment.id))).scalars()
++        for row in rows:
++            grouped.setdefault(row.message_id, []).append(attachment_payload(vault, row))
++    return grouped
++
++
++async def delete_message_attachments(db: AsyncSession, settings: Settings, message_id: int) -> None:
++    rows = (await db.execute(select(Attachment).where(Attachment.message_id == message_id))).scalars().all()
++    await db.execute(delete(Attachment).where(Attachment.message_id == message_id))
++    for row in rows:
++        await asyncio.to_thread(blob_path(settings, row.storage_key).unlink, missing_ok=True)
++
++
++async def cleanup_attachments(db: AsyncSession, settings: Settings) -> int:
++    cutoff = utcnow() - PENDING_LIFETIME
++    await db.execute(delete(Attachment).where(Attachment.message_id.is_(None), Attachment.created_at < cutoff))
++    await db.commit()
++    keys = set((await db.execute(select(Attachment.storage_key))).scalars())
++    directory = media_directory(settings, "attachments")
++
++    def remove_orphans():
++        count = 0
++        for path in directory.iterdir():
++            if STORAGE_KEY.fullmatch(path.name) and path.name not in keys and path.stat().st_mtime < cutoff.timestamp():
++                path.unlink(missing_ok=True)
++                count += 1
++        return count
++
++    return await asyncio.to_thread(remove_orphans)
+diff --git a/backend/app/services/class_spaces.py b/backend/app/services/class_spaces.py
+index 39e8ee4..d7278ca 100644
+--- a/backend/app/services/class_spaces.py
++++ b/backend/app/services/class_spaces.py
+@@ -14,6 +14,8 @@ from ..models import ClassSpaceMember, ClassSpaceMessage, Profile, ReadState, Sc
+ from ..models.enums import AccountStatus
+ from .messages import clean_content
+ from .serializers import iso, sid, user_card
++from .link_embeds import EmbedService
++from .message_media import open_media, seal_media
+ 
+ logger = get_logger("pollakcord.class_space")
+ PURPOSE = "class-space-message"
+@@ -38,9 +40,10 @@ def class_summary(school_class: SchoolClass) -> dict[str, Any]:
+ 
+ 
+ class ClassSpaceService:
+-    def __init__(self, vault: Vault, settings: Settings) -> None:
++    def __init__(self, vault: Vault, settings: Settings, embeds: EmbedService | None = None) -> None:
+         self._vault = vault
+         self._max_length = settings.message_max_length
++        self._embeds = embeds or EmbedService(settings)
+ 
+     @staticmethod
+     def _aad(message_id: int, school_class_id: int) -> bytes:
+@@ -212,6 +215,7 @@ class ClassSpaceService:
+ 
+     async def send(self, db: AsyncSession, school_class: SchoolClass, member: ClassSpaceMember, author: User, content: str) -> ClassSpaceMessage:
+         text = clean_content(content, self._max_length)
++        embeds = await self._embeds.build(text)
+         message_id = new_id()
+         body_enc, key_id = self._vault.encrypt(PURPOSE, text.encode("utf-8"), self._aad(message_id, school_class.id))
+         message = ClassSpaceMessage(
+@@ -223,6 +227,7 @@ class ClassSpaceService:
+             key_id=key_id,
+         )
+         db.add(message)
++        message.media_enc, message.media_key_id = seal_media(self._vault, f"class-space|{school_class.id}", message_id, embeds)
+         await db.flush()
+         return message
+ 
+@@ -262,6 +267,7 @@ class ClassSpaceService:
+                     "alias": self.alias(school_class.id, author_id) if anonymous_alias and author_id is not None else None,
+                     "mine": mine,
+                     "content": self._open(message) or "",
++                    "embeds": open_media(self._vault, f"class-space|{school_class.id}", message.id, message.media_enc, message.media_key_id)["embeds"],
+                     "created_at": iso(message.created_at),
+                 }
+             )
+diff --git a/backend/app/services/dok.py b/backend/app/services/dok.py
+index 2aa9bbd..15a9677 100644
+--- a/backend/app/services/dok.py
++++ b/backend/app/services/dok.py
+@@ -18,6 +18,8 @@ from . import people
+ from .messages import clean_content
+ from .notifications import notify
+ from .serializers import iso, sid
++from .link_embeds import EmbedService
++from .message_media import open_media, seal_media
+ 
+ logger = get_logger("pollakcord.dok")
+ PURPOSE = "dok-message"
+@@ -80,9 +82,10 @@ def class_target(school_class: SchoolClass) -> dict[str, Any]:
+ 
+ 
+ class DokService:
+-    def __init__(self, vault: Vault, settings: Settings) -> None:
++    def __init__(self, vault: Vault, settings: Settings, embeds: EmbedService | None = None) -> None:
+         self._vault = vault
+         self._max_length = settings.message_max_length
++        self._embeds = embeds or EmbedService(settings)
+ 
+     @staticmethod
+     def _aad(message_id: int, thread_id: int) -> bytes:
+@@ -127,10 +130,12 @@ class DokService:
+ 
+     async def send(self, db: AsyncSession, target: Target, author: User, content: str) -> tuple[DokThread, DokMessage]:
+         text = clean_content(content, self._max_length)
++        embeds = await self._embeds.build(text)
+         thread = await self._thread_for(db, target, author.id)
+         message_id = new_id()
+         body_enc, key_id = self._vault.encrypt(PURPOSE, text.encode("utf-8"), self._aad(message_id, thread.id))
+         message = DokMessage(id=message_id, thread_id=thread.id, author_id=author.id, author_role=author.platform_role, body_enc=body_enc, key_id=key_id)
++        message.media_enc, message.media_key_id = seal_media(self._vault, f"dok|{thread.id}", message_id, embeds)
+         db.add(message)
+         thread.last_message_at = utcnow()
+         await db.flush()
+@@ -201,6 +206,7 @@ class DokService:
+                     "author": cards.get(message.author_id) if message.author_id in visible else None,
+                     "mine": message.author_id == viewer.id,
+                     "content": self._open(message) or "",
++                    "embeds": open_media(self._vault, f"dok|{thread.id}", message.id, message.media_enc, message.media_key_id)["embeds"],
+                     "created_at": iso(message.created_at),
+                 }
+             )
+diff --git a/backend/app/services/link_embeds.py b/backend/app/services/link_embeds.py
+new file mode 100644
+index 0000000..779c126
+--- /dev/null
++++ b/backend/app/services/link_embeds.py
+@@ -0,0 +1,269 @@
++import asyncio
++import base64
++import io
++import ipaddress
++import re
++import socket
++import ssl
++from dataclasses import dataclass
++from email.parser import BytesParser
++from html.parser import HTMLParser
++from urllib.parse import urljoin, urlsplit, urlunsplit
++
++from ..config import Settings
++from .uploads import ImageSpec, transform_image
++
++URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
++BLOCKED_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home", ".test", ".invalid", ".example")
++TRANSITION_NETWORKS = tuple(ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32"))
++MAX_DOCUMENT_BYTES = 524_288
++MAX_IMAGE_BYTES = 1_000_000
++MAX_REDIRECTS = 3
++TLS_CONTEXT = ssl.create_default_context()
++
++
++class UnsafeURL(ValueError):
++    pass
++
++
++def public_ip(value: str) -> bool:
++    address = ipaddress.ip_address(value)
++    if str(address) == "168.63.129.16":
++        return False
++    if isinstance(address, ipaddress.IPv6Address):
++        if address.ipv4_mapped is not None or any(address in network for network in TRANSITION_NETWORKS):
++            return False
++    return address.is_global and not address.is_multicast and not address.is_reserved
++
++
++def validate_url(value: str, settings: Settings) -> tuple[str, str, int]:
++    if len(value) > 2048 or any(ord(ch) < 33 or ord(ch) == 127 for ch in value) or "\\" in value:
++        raise UnsafeURL()
++    try:
++        parts = urlsplit(value)
++        host = (parts.hostname or "").rstrip(".").encode("idna").decode("ascii").lower()
++        port = parts.port or (443 if parts.scheme == "https" else 80)
++    except (ValueError, UnicodeError) as exc:
++        raise UnsafeURL() from exc
++    if parts.scheme not in ("http", "https") or not host or parts.username is not None or parts.password is not None:
++        raise UnsafeURL()
++    if port != (443 if parts.scheme == "https" else 80) or "%" in host or host.endswith(BLOCKED_SUFFIXES):
++        raise UnsafeURL()
++    own_hosts = {(urlsplit(origin).hostname or "").rstrip(".").encode("idna").decode("ascii").lower() for origin in settings.allowed_origins}
++    if host in own_hosts or host == "localhost":
++        raise UnsafeURL()
++    try:
++        if not public_ip(host):
++            raise UnsafeURL()
++    except ValueError as exc:
++        if isinstance(exc, UnsafeURL) or "." not in host or ":" in host:
++            raise UnsafeURL() from exc
++    if re.search(r"/(admin|auth|login|logout|settings|account)(/|$)", parts.path, re.IGNORECASE):
++        raise UnsafeURL()
++    normalized_host = f"[{host}]" if ":" in host else host
++    return urlunsplit((parts.scheme, normalized_host, parts.path or "/", parts.query, "")), host, port
++
++
++async def resolve_public(host: str, port: int) -> str:
++    records = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
++    addresses = list(dict.fromkeys(record[4][0] for record in records))
++    if not addresses or not all(public_ip(address) for address in addresses):
++        raise UnsafeURL()
++    return addresses[0]
++
++
++@dataclass(frozen=True)
++class Fetched:
++    url: str
++    content_type: str
++    data: bytes
++
++
++async def _response(url: str, host: str, port: int, ip: str, limit: int) -> tuple[int, dict[str, str], bytes]:
++    parts = urlsplit(url)
++    reader, writer = await asyncio.open_connection(
++        ip, port, ssl=TLS_CONTEXT if parts.scheme == "https" else None,
++        server_hostname=host if parts.scheme == "https" else None, limit=16384,
++    )
++    try:
++        target = (parts.path or "/") + ("?" + parts.query if parts.query else "")
++        request = (
++            f"GET {target} HTTP/1.1\r\nHost: {parts.netloc}\r\nUser-Agent: PollakCord-LinkPreview/1.0\r\n"
++            "Accept: text/html, image/*;q=0.8\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
++        )
++        writer.write(request.encode("ascii"))
++        await writer.drain()
++        header = await reader.readuntil(b"\r\n\r\n")
++        if len(header) > 16384:
++            raise ValueError()
++        status_line, raw_headers = header.split(b"\r\n", 1)
++        version, status, _ = status_line.split(b" ", 2)
++        if version not in (b"HTTP/1.0", b"HTTP/1.1"):
++            raise ValueError()
++        parsed = BytesParser().parsebytes(raw_headers)
++        if any(len(parsed.get_all(key, [])) > 1 for key in ("Content-Length", "Transfer-Encoding", "Location", "Content-Encoding")):
++            raise ValueError()
++        headers = {key.lower(): value.strip() for key, value in parsed.items()}
++        code = int(status)
++        if code in (301, 302, 303, 307, 308):
++            return code, headers, b""
++        if code != 200 or headers.get("content-encoding", "identity").lower() != "identity":
++            raise ValueError()
++        length = int(headers["content-length"]) if "content-length" in headers else None
++        if length is not None and (length < 0 or length > limit):
++            raise ValueError()
++        body = bytearray()
++        transfer = headers.get("transfer-encoding", "").lower()
++        if transfer:
++            if transfer != "chunked" or length is not None:
++                raise ValueError()
++            for _ in range(4096):
++                line = await reader.readuntil(b"\r\n")
++                if len(line) > 128:
++                    raise ValueError()
++                size = int(line.split(b";", 1)[0].strip(), 16)
++                if size < 0 or len(body) + size > limit:
++                    raise ValueError()
++                if size == 0:
++                    return code, headers, bytes(body)
++                body.extend(await reader.readexactly(size))
++                if await reader.readexactly(2) != b"\r\n":
++                    raise ValueError()
++            raise ValueError()
++        while len(body) <= limit and (length is None or len(body) < length):
++            chunk = await reader.read(min(65536, limit + 1 - len(body), length - len(body) if length is not None else limit + 1))
++            if not chunk:
++                break
++            body.extend(chunk)
++        if len(body) > limit or (length is not None and len(body) != length):
++            raise ValueError()
++        return code, headers, bytes(body)
++    finally:
++        writer.close()
++
++
++async def safe_fetch(url: str, settings: Settings, *, max_bytes: int = MAX_DOCUMENT_BYTES) -> Fetched:
++    async with asyncio.timeout(settings.link_embed_timeout_seconds):
++        for hop in range(MAX_REDIRECTS + 1):
++            url, host, port = validate_url(url, settings)
++            ip = await resolve_public(host, port)
++            status, headers, data = await _response(url, host, port, ip, max_bytes)
++            if status in (301, 302, 303, 307, 308):
++                if hop == MAX_REDIRECTS or not headers.get("location"):
++                    raise UnsafeURL()
++                url = urljoin(url, headers["location"])
++                continue
++            return Fetched(url, headers.get("content-type", "").lower(), data)
++    raise UnsafeURL()
++
++
++class MetadataParser(HTMLParser):
++    def __init__(self) -> None:
++        super().__init__(convert_charrefs=True)
++        self.meta: dict[str, str] = {}
++        self.title = ""
++        self.icon: str | None = None
++        self.in_title = False
++
++    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
++        values = {key.lower(): value for key, value in attrs if value is not None}
++        if tag == "meta":
++            key = (values.get("property") or values.get("name") or "").lower()
++            if key not in self.meta:
++                self.meta[key] = values.get("content", "")[:2000]
++        if tag == "title":
++            self.in_title = True
++        if tag == "link" and "icon" in values.get("rel", "").lower().split():
++            self.icon = values.get("href")
++
++    def handle_endtag(self, tag: str) -> None:
++        if tag == "title":
++            self.in_title = False
++
++    def handle_data(self, data: str) -> None:
++        if self.in_title:
++            self.title = (self.title + data)[:300]
++
++
++def compact(value: str, limit: int) -> str:
++    return " ".join(value.replace("\x00", "").split())[:limit]
++
++
++def preview_image(data: bytes, settings: Settings, *, icon: bool) -> str:
++    from PIL import Image
++
++    with Image.open(io.BytesIO(data)) as image:
++        extension = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp", "GIF": "gif"}.get(image.format)
++    if extension is None:
++        raise ValueError()
++    spec = ImageSpec("attachment_max_bytes", 1, 1, 10000, (64, 64) if icon else (640, 360), False)
++    output = transform_image(data, spec, extension, min(settings.max_image_pixels, 4_000_000))
++    if len(output) > 100_000:
++        raise ValueError()
++    return "data:image/webp;base64," + base64.b64encode(output).decode("ascii")
++
++
++class EmbedService:
++    def __init__(self, settings: Settings) -> None:
++        self.settings = settings
++        self.slots = asyncio.Semaphore(4)
++
++    async def _image(self, base: str, value: str | None, *, icon: bool = False) -> str | None:
++        if not value:
++            return None
++        try:
++            result = await safe_fetch(urljoin(base, value), self.settings, max_bytes=MAX_IMAGE_BYTES)
++            if not result.content_type.startswith("image/"):
++                return None
++            return await asyncio.to_thread(preview_image, result.data, self.settings, icon=icon)
++        except Exception:
++            return None
++
++    async def _one(self, url: str) -> dict | None:
++        try:
++            url, host, _ = validate_url(url, self.settings)
++        except UnsafeURL:
++            return None
++        minimal = {"url": url, "host": host, "title": host}
++        try:
++            result = await safe_fetch(url, self.settings)
++            if not result.content_type.startswith("text/html"):
++                return minimal
++            parser = MetadataParser()
++            charset = re.search(r"charset=[\"']?([\w-]+)", result.content_type)
++            parser.feed(result.data.decode(charset[1] if charset else "utf-8", errors="replace"))
++            meta = parser.meta
++            image, icon = await asyncio.gather(
++                self._image(result.url, meta.get("og:image") or meta.get("twitter:image")),
++                self._image(result.url, parser.icon, icon=True),
++            )
++            return {
++                **minimal,
++                "title": compact(meta.get("og:title") or parser.title or host, 200),
++                "description": compact(meta.get("og:description") or meta.get("description", ""), 350),
++                "site_name": compact(meta.get("og:site_name", ""), 80),
++                "image": image,
++                "icon": icon,
++            }
++        except UnsafeURL:
++            return None
++        except Exception:
++            return minimal
++
++    async def build(self, content: str) -> list[dict]:
++        if not self.settings.link_embeds_enabled:
++            return []
++        urls = list(dict.fromkeys(match[0].rstrip(".,;:!?)\\]}") for match in URL_PATTERN.finditer(content)))[:2]
++        if not urls:
++            return []
++        acquired = False
++        try:
++            await asyncio.wait_for(self.slots.acquire(), timeout=0.05)
++            acquired = True
++            async with asyncio.timeout(self.settings.link_embed_timeout_seconds):
++                return [item for item in await asyncio.gather(*(self._one(url) for url in urls)) if item]
++        except Exception:
++            return []
++        finally:
++            if acquired:
++                self.slots.release()
+diff --git a/backend/app/services/media_access.py b/backend/app/services/media_access.py
+new file mode 100644
+index 0000000..840c565
+--- /dev/null
++++ b/backend/app/services/media_access.py
+@@ -0,0 +1,32 @@
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from ..db.types import utcnow
++from ..errors import AppError
++from ..models import Conversation, User
++from ..models.enums import ChannelType
++from . import privacy
++from .permissions import Perm, load_channel_context
++
++
++async def require_media_scope(db: AsyncSession, user: User, scope: str, scope_id: int, *, write: bool) -> None:
++    if not 0 < scope_id < 2**63:
++        raise AppError("not_found", 404)
++    if scope == "channel":
++        channel, context = await load_channel_context(db, scope_id, user.id)
++        if channel.type != ChannelType.TEXT.value:
++            raise AppError("channel_type_invalid", 422)
++        if write and context.member.timeout_until is not None and context.member.timeout_until > utcnow():
++            raise AppError("timed_out", 403)
++        context.require_in(channel, Perm.SEND_MESSAGES if write else Perm.READ_MESSAGE_HISTORY)
++        return
++    if scope != "dm":
++        raise AppError("not_found", 404)
++    conversation = await db.get(Conversation, scope_id)
++    if conversation is None or user.id not in (conversation.user_low_id, conversation.user_high_id):
++        raise AppError("not_found", 404)
++    if write:
++        other_id = conversation.user_high_id if user.id == conversation.user_low_id else conversation.user_low_id
++        relation = await privacy.relation(db, user.id, other_id)
++        preferences = await privacy.get_settings_row(db, other_id)
++        if not privacy.can_direct_message(relation, preferences):
++            raise AppError("dm_not_allowed", 403)
+diff --git a/backend/app/services/message_media.py b/backend/app/services/message_media.py
+new file mode 100644
+index 0000000..8e63422
+--- /dev/null
++++ b/backend/app/services/message_media.py
+@@ -0,0 +1,33 @@
++import json
++import re
++
++from ..config import Settings
++from ..crypto.envelope import DecryptionError, Vault
++from ..errors import AppError
++
++GIPHY_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
++
++
++def validate_giphy(giphy_id: str | None, settings: Settings) -> None:
++    if giphy_id is None:
++        return
++    if not settings.giphy_api_key or not settings.giphy_api_key.get_secret_value().strip():
++        raise AppError("giphy_disabled", 503)
++    if not GIPHY_ID.fullmatch(giphy_id):
++        raise AppError("validation_error", 422)
++
++
++def seal_media(vault: Vault, domain: str, message_id: int, embeds: list[dict], giphy_id: str | None = None) -> tuple[bytes | None, str | None]:
++    if not embeds and giphy_id is None:
++        return None, None
++    payload = json.dumps({"embeds": embeds, "giphy_id": giphy_id}, ensure_ascii=False).encode("utf-8")
++    return vault.encrypt("message-media", payload, f"{domain}|{message_id}".encode())
++
++
++def open_media(vault: Vault, domain: str, message_id: int, blob: bytes | None, key_id: str | None) -> dict:
++    if blob is None or key_id is None:
++        return {"embeds": [], "giphy_id": None}
++    try:
++        return json.loads(vault.decrypt("message-media", blob, f"{domain}|{message_id}".encode(), key_id))
++    except (DecryptionError, ValueError, UnicodeError):
++        return {"embeds": [], "giphy_id": None}
+diff --git a/backend/app/services/messages.py b/backend/app/services/messages.py
+index 96cf733..9a6193f 100644
+--- a/backend/app/services/messages.py
++++ b/backend/app/services/messages.py
+@@ -29,6 +29,9 @@ from ..models import (
+ )
+ from ..models.enums import ScopeKind
+ from .serializers import iso, sid, user_card
++from .attachments import attachments_for, claim_attachments, delete_message_attachments
++from .link_embeds import EmbedService
++from .message_media import open_media, seal_media, validate_giphy
+ 
+ logger = get_logger("pollakcord.messages")
+ ALLOWED_REACTIONS = ("👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "👀", "✅", "❌", "🙏", "💯")
+@@ -42,9 +45,9 @@ def extract_mentions(content: str) -> set[int]:
+     return {int(match) for match in MENTION_PATTERN.findall(content)}
+ 
+ 
+-def clean_content(content: str, limit: int) -> str:
++def clean_content(content: str, limit: int, *, allow_empty: bool = False) -> str:
+     cleaned = content.replace("\x00", "").replace("\r\n", "\n").strip()
+-    if not cleaned:
++    if not cleaned and not allow_empty:
+         raise AppError("message_empty", 422)
+     if len(cleaned) > limit:
+         raise AppError("message_too_long", 422, params={"max": limit})
+@@ -67,8 +70,10 @@ class MessageScope:
+ 
+ 
+ class MessageService:
+-    def __init__(self, vault: Vault, settings: Settings) -> None:
++    def __init__(self, vault: Vault, settings: Settings, embeds: EmbedService | None = None) -> None:
+         self._vault = vault
++        self._settings = settings
++        self._embeds = embeds or EmbedService(settings)
+         self._rotation = settings.data_key_rotation_messages
+         self._max_length = settings.message_max_length
+         self._cache: OrderedDict[int, bytes] = OrderedDict()
+@@ -138,8 +143,11 @@ class MessageService:
+         *,
+         reply_to_id: int | None,
+         mentions: set[int],
++        attachment_ids: list[int] | None = None,
++        giphy_id: str | None = None,
+     ) -> tuple[Message, str]:
+-        text = clean_content(content, self._max_length)
++        validate_giphy(giphy_id, self._settings)
++        text = clean_content(content, self._max_length, allow_empty=bool(attachment_ids or giphy_id))
+         if reply_to_id is not None:
+             target = await db.get(Message, reply_to_id)
+             same_scope = target is not None and (
+@@ -148,10 +156,13 @@ class MessageService:
+             )
+             if not same_scope or target.deleted_at is not None:
+                 raise AppError("reply_target_invalid", 422)
++        embeds = await self._embeds.build(text)
+         key_id, raw_key = await self._active_key(db, scope)
+         message = Message(id=new_id(), author_id=author_id, reply_to_id=reply_to_id, **scope_columns(scope.kind, scope.scope_id))
++        message.media_enc, message.media_key_id = seal_media(self._vault, f"chat|{scope.kind.value}|{scope.scope_id}", message.id, embeds, giphy_id)
+         db.add(message)
+         await db.flush()
++        await claim_attachments(db, attachment_ids or [], author_id, scope.kind.value, scope.scope_id, message.id)
+         sealed = seal(raw_key, text.encode("utf-8"), self._message_aad(message.id, scope.kind.value, scope.scope_id, author_id))
+         db.add(MessageContent(message_id=message.id, data_key_id=key_id, ciphertext=sealed))
+         await db.execute(update(DataKey).where(DataKey.id == key_id).values(message_count=DataKey.message_count + 1))
+@@ -204,6 +215,7 @@ class MessageService:
+         reply_ids = {m.reply_to_id for m in messages if m.reply_to_id}
+         previews = await self._previews(db, reply_ids)
+         reactions = await self._reactions(db, [m.id for m in messages], viewer_id)
++        attachments = await attachments_for(db, self._vault, [m.id for m in messages if m.deleted_at is None])
+         result = []
+         for message in messages:
+             deleted = message.deleted_at is not None
+@@ -220,6 +232,8 @@ class MessageService:
+                     "reply_to": previews.get(message.reply_to_id) if message.reply_to_id else None,
+                     "pinned": message.pinned_at is not None,
+                     "reactions": [] if deleted else reactions.get(message.id, []),
++                    "attachments": [] if deleted else attachments.get(message.id, []),
++                    **({"embeds": [], "giphy_id": None} if deleted else open_media(self._vault, f"chat|{scope.kind.value}|{scope.scope_id}", message.id, message.media_enc, message.media_key_id)),
+                 }
+             )
+         return result
+@@ -280,6 +294,9 @@ class MessageService:
+         message.deleted_at = utcnow()
+         message.pinned_at = None
+         message.pinned_by = None
++        message.media_enc = None
++        message.media_key_id = None
++        await delete_message_attachments(db, self._settings, message.id)
+         for model in (MessageContent, SearchToken, Reaction, Mention):
+             await db.execute(delete(model).where(model.message_id == message.id))
+ 
+diff --git a/backend/migrations/versions/0005_message_media.py b/backend/migrations/versions/0005_message_media.py
+new file mode 100644
+index 0000000..8052106
+--- /dev/null
++++ b/backend/migrations/versions/0005_message_media.py
+@@ -0,0 +1,48 @@
++import sqlalchemy as sa
++from alembic import op
++
++revision = "0005"
++down_revision = "0004"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    for table in ("messages", "dok_messages", "class_space_messages"):
++        op.add_column(table, sa.Column("media_enc", sa.LargeBinary(), nullable=True))
++        op.add_column(table, sa.Column("media_key_id", sa.String(16), nullable=True))
++    op.create_table(
++        "attachments",
++        sa.Column("id", sa.BigInteger(), autoincrement=False, nullable=False),
++        sa.Column("owner_id", sa.BigInteger(), nullable=False),
++        sa.Column("channel_id", sa.BigInteger(), nullable=True),
++        sa.Column("conversation_id", sa.BigInteger(), nullable=True),
++        sa.Column("message_id", sa.BigInteger(), nullable=True),
++        sa.Column("storage_key", sa.String(32), nullable=False),
++        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
++        sa.Column("mime_type", sa.String(100), nullable=False),
++        sa.Column("kind", sa.String(8), nullable=False),
++        sa.Column("metadata_enc", sa.LargeBinary(), nullable=False),
++        sa.Column("key_id", sa.String(16), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
++        sa.CheckConstraint(
++            "(channel_id IS NOT NULL AND conversation_id IS NULL) OR (channel_id IS NULL AND conversation_id IS NOT NULL)",
++            name=op.f("ck_attachments_single_scope"),
++        ),
++        sa.ForeignKeyConstraint(["owner_id"], ["users.id"], name=op.f("fk_attachments_owner_id_users"), ondelete="CASCADE"),
++        sa.ForeignKeyConstraint(["channel_id"], ["channels.id"], name=op.f("fk_attachments_channel_id_channels"), ondelete="CASCADE"),
++        sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"], name=op.f("fk_attachments_conversation_id_conversations"), ondelete="CASCADE"),
++        sa.ForeignKeyConstraint(["message_id"], ["messages.id"], name=op.f("fk_attachments_message_id_messages"), ondelete="CASCADE"),
++        sa.PrimaryKeyConstraint("id", name=op.f("pk_attachments")),
++        sa.UniqueConstraint("storage_key", name=op.f("uq_attachments_storage_key")),
++    )
++    op.create_index("ix_attachments_owner_id", "attachments", ["owner_id"])
++    op.create_index("ix_attachments_message_id", "attachments", ["message_id"])
++
++
++def downgrade() -> None:
++    op.drop_table("attachments")
++    for table in ("messages", "dok_messages", "class_space_messages"):
++        with op.batch_alter_table(table) as batch:
++            batch.drop_column("media_key_id")
++            batch.drop_column("media_enc")
+diff --git a/backend/tests/test_media.py b/backend/tests/test_media.py
+new file mode 100644
+index 0000000..7cd3519
+--- /dev/null
++++ b/backend/tests/test_media.py
+@@ -0,0 +1,372 @@
++import asyncio
++import io
++import sqlite3
++from datetime import timedelta
++from unittest.mock import AsyncMock
++
++import httpx
++import pytest
++from PIL import Image
++
++from app.config import Settings
++from app.db.types import utcnow
++from app.errors import AppError
++from app.services import link_embeds
++from app.services.attachments import ELEVATED_ROLES, attachment_limit, check_size, cleanup_attachments
++from app.services.link_embeds import EmbedService, Fetched, UnsafeURL, public_ip, safe_fetch, validate_url
++from app.services.message_media import open_media, seal_media
++
++from .conftest import ORIGIN, create_server, database_dump, database_path, first_channel, join_server, sql_rows
++from .test_messages import friends_with_dm
++from .test_dok import class_member, to_class
++from .test_class_spaces import answer, class_id, say
++
++
++def set_role(user, role):
++    with sqlite3.connect(database_path(user.app)) as db:
++        db.execute("UPDATE users SET platform_role=? WHERE id=?", (role, int(user.uid)))
++
++
++def attachment_upload(user, channel, data=b"document", filename="dokumentum.txt", mime="text/plain"):
++    return user.request("POST", f"/uploads/attachments?scope=channel&scope_id={channel}", files={"file": (filename, data, mime)})
++
++
++def setup_channel(make_user):
++    owner = make_user("media_owner")
++    server = create_server(owner)
++    return owner, server, first_channel(server, "text")["id"]
++
++
++async def stream_upload(user, channel, size):
++    boundary = "pollakcord-media-test"
++
++    async def body():
++        yield f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="large.bin"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
++        block = b"x" * 1_000_000
++        remaining = size
++        while remaining:
++            amount = min(remaining, len(block))
++            yield block[:amount]
++            remaining -= amount
++        yield f"\r\n--{boundary}--\r\n".encode()
++
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=user.app), base_url=ORIGIN, cookies=user.jar) as client:
++        return await client.post(
++            "/api/v1/uploads/attachments", params={"scope": "channel", "scope_id": channel}, content=body(),
++            headers={"Origin": ORIGIN, "X-CSRF-Token": user.csrf, "Content-Type": f"multipart/form-data; boundary={boundary}"},
++        )
++
++
++@pytest.mark.parametrize("role", ["user", *sorted(ELEVATED_ROLES)])
++def test_actual_streamed_upload_boundaries_for_every_human_role(make_user, role):
++    user, _, channel = setup_channel(make_user)
++    set_role(user, role)
++    limit = 20_000_000 if role == "user" else 250_000_000
++    assert attachment_limit(user.app.state.settings, role) == limit
++    allowed = asyncio.run(stream_upload(user, channel, limit))
++    assert allowed.status_code == 200, allowed.text
++    assert allowed.json()["size_bytes"] == limit
++    rejected = asyncio.run(stream_upload(user, channel, limit + 1))
++    assert rejected.status_code == 413 and rejected.json()["error"]["params"]["max_bytes"] == limit
++    assert len(sql_rows(user.app, "SELECT id FROM attachments")) == 1
++    assert len(list((user.app.state.settings.upload_dir / "attachments").iterdir())) == 1
++
++
++def test_size_helper_uses_configured_limits():
++    settings = Settings(attachment_max_bytes=8, attachment_elevated_max_bytes=15)
++    assert attachment_limit(settings, "user") == 8
++    assert attachment_limit(settings, "school_admin") == 15
++    check_size(8, 8)
++    with pytest.raises(AppError) as caught:
++        check_size(9, 8)
++    assert caught.value.code == "file_too_large"
++
++
++def test_attachments_are_private_scope_bound_and_claimed_only_once(make_user, new_api):
++    owner, server, channel = setup_channel(make_user)
++    peer, outsider = make_user("media_peer"), make_user("media_other")
++    join_server(peer, server["invite_code"])
++    upload = attachment_upload(owner, channel, filename="titkos-adatok.txt").json()
++    url = upload["url"].removeprefix("/api/v1")
++    assert new_api().get(url).status_code == 401
++    assert peer.get(url).status_code == 404
++    assert outsider.get(url).status_code == 404
++    assert owner.get(url).status_code == 200
++    assert peer.post(f"/channels/{channel}/messages", {"attachment_ids": [upload["id"]]}).json()["error"]["code"] == "attachment_invalid"
++    other = owner.post(f"/servers/{server['id']}/channels", {"name": "masik", "type": "text"}).json()["id"]
++    assert owner.post(f"/channels/{other}/messages", {"attachment_ids": [upload["id"]]}).status_code == 422
++    sent = owner.post(f"/channels/{channel}/messages", {"attachment_ids": [upload["id"]]})
++    assert sent.status_code == 200 and sent.json()["content"] == ""
++    assert sent.json()["attachments"] == [upload]
++    assert peer.get(url).status_code == 200 and outsider.get(url).status_code == 404
++    assert owner.post(f"/channels/{channel}/messages", {"attachment_ids": [upload["id"]]}).status_code == 422
++    assert owner.delete(url).status_code == 404
++    assert "titkos-adatok.txt" not in database_dump(owner.app)
++    assert owner.delete(f"/channels/{channel}/messages/{sent.json()['id']}").status_code == 200
++    assert owner.get(url).status_code == 404 and peer.get(url).status_code == 404
++    assert sql_rows(owner.app, "SELECT COUNT(*) FROM attachments")[0][0] == 0
++
++
++def test_non_inline_files_are_always_downloads_even_when_mislabeled(make_user):
++    owner, _, channel = setup_channel(make_user)
++    for name, mime in (("evil.html", "text/html"), ("evil.svg", "image/svg+xml"), ("evil.js", "application/javascript"), ("evil.png", "image/png")):
++        uploaded = attachment_upload(owner, channel, b"<script>alert(1)</script>", name, mime).json()
++        response = owner.get(uploaded["url"].removeprefix("/api/v1") + "?inline=true")
++        assert uploaded["kind"] == "file"
++        assert response.headers["content-type"] == "application/octet-stream"
++        assert response.headers["content-disposition"].startswith("attachment;")
++        assert response.headers["x-content-type-options"] == "nosniff"
++        assert "sandbox" in response.headers["content-security-policy"]
++        assert response.headers["cache-control"] == "no-store"
++
++
++def test_images_are_reencoded_and_video_is_served_with_safe_headers_and_ranges(make_user):
++    owner, _, channel = setup_channel(make_user)
++    output = io.BytesIO()
++    Image.new("RGB", (128, 128), "red").save(output, format="PNG")
++    image = attachment_upload(owner, channel, output.getvalue() + b"<script>secret</script>", "photo.png").json()
++    served = owner.get(image["url"].removeprefix("/api/v1") + "?inline=true")
++    assert image["kind"] == "image" and served.headers["content-type"] == "image/webp"
++    assert b"<script>" not in served.content
++    assert Image.open(io.BytesIO(served.content)).format == "WEBP"
++    video = attachment_upload(owner, channel, b"\x00\x00\x00\x18ftypisom" + b"x" * 100, "video.mp4").json()
++    partial = owner.get(video["url"].removeprefix("/api/v1") + "?inline=true", headers={"Range": "bytes=0-11"})
++    assert video["kind"] == "video" and partial.status_code == 206
++    assert partial.headers["content-type"] == "video/mp4"
++    assert partial.headers["content-disposition"].startswith("inline;")
++
++
++def test_upload_and_download_permissions_reuse_channel_rules(make_user):
++    owner, server, channel = setup_channel(make_user)
++    peer = make_user("media_peer")
++    join_server(peer, server["invite_code"])
++    assert attachment_upload(peer, channel).status_code == 200
++    assert owner.put(f"/channels/{channel}/overwrites/member/{peer.uid}", {"deny": ["send_messages"]}).status_code == 200
++    assert attachment_upload(peer, channel).status_code == 403
++    assert owner.put(f"/channels/{channel}/overwrites/member/{peer.uid}", {"deny": ["view_channel"]}).status_code == 200
++    assert attachment_upload(peer, channel).status_code == 404
++    voice = first_channel(server, "voice")["id"]
++    assert attachment_upload(owner, voice).status_code == 422
++
++
++def test_upload_requires_full_auth_csrf_and_origin(api, make_user):
++    owner, _, channel = setup_channel(make_user)
++    assert attachment_upload(api, channel).status_code == 401
++    assert owner.request("POST", f"/uploads/attachments?scope=channel&scope_id={channel}", headers={"X-CSRF-Token": "wrong"}, files={"file": ("x", b"x")}).status_code == 403
++    assert owner.request("POST", f"/uploads/attachments?scope=channel&scope_id={channel}", headers={"Origin": "https://evil.com"}, files={"file": ("x", b"x")}).status_code == 403
++
++
++def test_rate_limits_count_uploaded_bytes_and_requests(make_user):
++    owner, _, channel = setup_channel(make_user)
++    settings = owner.app.state.settings
++    settings.attachment_hourly_bytes = 10
++    owner.app.state.limiter.enabled = True
++    assert attachment_upload(owner, channel, b"123456").status_code == 200
++    rejected = attachment_upload(owner, channel, b"12345")
++    assert rejected.status_code == 429 and int(rejected.headers["retry-after"]) > 0
++    assert len(sql_rows(owner.app, "SELECT id FROM attachments")) == 1
++    settings.attachment_hourly_bytes = 100_000
++    owner.app.state.limiter.check(f"attachment-upload:{owner.uid}", 1, 3600)
++    for _ in range(60):
++        owner.app.state.limiter.check(f"attachment-upload:{owner.uid}", 100, 3600)
++    assert attachment_upload(owner, channel, b"x").status_code == 429
++
++
++def test_expired_pending_files_can_be_cleaned_without_deleting_message_files(make_user):
++    owner, _, channel = setup_channel(make_user)
++    pending = attachment_upload(owner, channel).json()
++    attached = attachment_upload(owner, channel).json()
++    assert owner.post(f"/channels/{channel}/messages", {"attachment_ids": [attached["id"]]}).status_code == 200
++    cutoff = utcnow() - timedelta(days=2)
++    with sqlite3.connect(database_path(owner.app)) as db:
++        db.execute("UPDATE attachments SET created_at=?", (cutoff.isoformat(),))
++    assert owner.get(pending["url"].removeprefix("/api/v1")).status_code == 404
++    async def clean():
++        async with owner.app.state.session_factory() as db:
++            await cleanup_attachments(db, owner.app.state.settings)
++    asyncio.run(clean())
++    assert sql_rows(owner.app, "SELECT id FROM attachments") == [(int(attached["id"]),)]
++
++
++def test_giphy_is_disabled_without_a_key_and_only_ids_are_persisted(make_user):
++    owner, _, channel = setup_channel(make_user)
++    assert owner.get("/uploads/config").json()["giphy_api_key"] is None
++    assert owner.post(f"/channels/{channel}/messages", {"giphy_id": "SchoolGif"}).json()["error"]["code"] == "giphy_disabled"
++    owner.app.state.settings.giphy_api_key = Settings(giphy_api_key="browser-key").giphy_api_key
++    sent = owner.post(f"/channels/{channel}/messages", {"giphy_id": "SchoolGif"})
++    assert sent.status_code == 200 and sent.json()["giphy_id"] == "SchoolGif"
++    assert "SchoolGif" not in database_dump(owner.app)
++    assert owner.post(f"/channels/{channel}/messages", {"giphy_id": "https://evil.com/x"}).status_code == 422
++
++
++def test_dm_uploads_obey_participation_privacy_blocks_and_current_permissions(make_user):
++    sender, recipient, conversation = friends_with_dm(make_user)
++    outsider = make_user("other_viewer")
++    path = f"/uploads/attachments?scope=dm&scope_id={conversation}"
++    upload = sender.request("POST", path, files={"file": ("notes.txt", b"notes")}).json()
++    url = upload["url"].removeprefix("/api/v1")
++    assert outsider.request("POST", path, files={"file": ("notes.txt", b"notes")}).status_code == 404
++    assert outsider.get(url).status_code == 404 and recipient.get(url).status_code == 404
++    sent = sender.post(f"/dms/{conversation}/messages", {"attachment_ids": [upload["id"]]})
++    assert sent.status_code == 200 and recipient.get(url).status_code == 200
++    assert sender.put(f"/blocks/{recipient.uid}").status_code == 200
++    assert sender.request("POST", path, files={"file": ("notes.txt", b"notes")}).status_code == 403
++    assert recipient.request("POST", path, files={"file": ("notes.txt", b"notes")}).status_code == 403
++
++
++def test_dok_and_class_space_embeds_preserve_anonymity_and_history_permissions(make_user, monkeypatch):
++    author = class_member(make_user, "rep_link", "9A")
++    peer = class_member(make_user, "peer_link", "9A")
++    outsider = class_member(make_user, "other_link", "10B")
++    set_role(author, "dok_representative")
++    monkeypatch.setattr(link_embeds, "safe_fetch", AsyncMock(return_value=Fetched("https://example.com/page", "text/html", b"<title>Confidential preview</title>")))
++    dok = to_class(author, "9A", "https://example.com/page").json()
++    history = peer.get(f"/dok/threads/{dok['thread_id']}/messages").json()["messages"][0]
++    assert history["embeds"][0]["title"] == "Confidential preview" and history["author"] is None
++    assert outsider.get(f"/dok/threads/{dok['thread_id']}/messages").status_code == 404
++    answer(author, False)
++    answer(peer, False)
++    sent = say(author, "https://example.com/page").json()
++    history = peer.get(f"/class-spaces/{class_id(author, '9A')}/messages").json()["messages"][0]
++    assert sent["embeds"] == history["embeds"] and history["author"] is None
++    assert "Confidential preview" not in database_dump(author.app)
++
++
++@pytest.mark.parametrize("url", [
++    "file:///etc/passwd", "ftp://example.com/x", "http://localhost/", "http://metadata.google.internal/", "http://intranet/",
++    "http://127.0.0.1/", "http://0.0.0.0/", "http://10.1.2.3/", "http://172.16.0.1/", "http://192.168.1.1/",
++    "http://169.254.169.254/latest/meta-data", "http://168.63.129.16/", "http://100.64.0.1/", "http://[::1]/", "http://[fc00::1]/",
++    "http://[fe80::1]/", "http://[::ffff:127.0.0.1]/", "http://[64:ff9b::a00:1]/", "http://[2002:7f00:1::]/",
++    "http://user:password@example.com/", "http://example.com:8080/", "http://example.com/admin/users", "http://testserver/app/admin",
++    "https://example.com/\r\nX-Test:yes", "https://example.com\\@127.0.0.1/",
++])
++def test_ssrf_urls_are_rejected_before_fetch(settings, url):
++    with pytest.raises(UnsafeURL):
++        validate_url(url, settings)
++
++
++def test_mixed_dns_private_and_public_addresses_are_rejected(monkeypatch):
++    async def run():
++        loop = asyncio.get_running_loop()
++        monkeypatch.setattr(loop, "getaddrinfo", AsyncMock(return_value=[(2, 1, 6, "", ("93.184.216.34", 443)), (2, 1, 6, "", ("10.0.0.1", 443))]))
++        with pytest.raises(UnsafeURL):
++            await link_embeds.resolve_public("example.com", 443)
++    asyncio.run(run())
++    assert public_ip("93.184.216.34") and not public_ip("127.0.0.1")
++
++
++def test_redirect_to_private_host_is_blocked(settings, monkeypatch):
++    resolve = AsyncMock(return_value="93.184.216.34")
++    response = AsyncMock(return_value=(302, {"location": "http://127.0.0.1/secret"}, b""))
++    monkeypatch.setattr(link_embeds, "resolve_public", resolve)
++    monkeypatch.setattr(link_embeds, "_response", response)
++    with pytest.raises(UnsafeURL):
++        asyncio.run(safe_fetch("https://example.com", settings))
++    assert response.await_count == 1 and resolve.await_count == 1
++
++
++def test_dns_is_pinned_while_tls_and_host_use_original_hostname(settings, monkeypatch):
++    class Writer:
++        def __init__(self):
++            self.request = b""
++        def write(self, data):
++            self.request += data
++        async def drain(self):
++            return None
++        def close(self):
++            return None
++
++    async def run():
++        reader = asyncio.StreamReader()
++        reader.feed_data(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nhello")
++        reader.feed_eof()
++        writer = Writer()
++        connect = AsyncMock(return_value=(reader, writer))
++        monkeypatch.setattr(link_embeds, "resolve_public", AsyncMock(return_value="93.184.216.34"))
++        monkeypatch.setattr(asyncio, "open_connection", connect)
++        result = await safe_fetch("https://example.com/page", settings)
++        assert result.data == b"hello"
++        assert connect.call_args.args == ("93.184.216.34", 443)
++        assert connect.call_args.kwargs["server_hostname"] == "example.com"
++        assert b"Host: example.com" in writer.request and b"Cookie:" not in writer.request
++    asyncio.run(run())
++
++
++def test_redirect_limit_and_response_limit(settings, monkeypatch):
++    monkeypatch.setattr(link_embeds, "resolve_public", AsyncMock(return_value="93.184.216.34"))
++    response = AsyncMock(return_value=(302, {"location": "https://example.com/loop"}, b""))
++    monkeypatch.setattr(link_embeds, "_response", response)
++    with pytest.raises(UnsafeURL):
++        asyncio.run(safe_fetch("https://example.com/loop", settings))
++    assert response.await_count == 4
++
++
++@pytest.mark.parametrize("headers,body", [
++    (b"Content-Length: 99\r\n", b""),
++    (b"", b"x" * 17),
++    (b"Transfer-Encoding: chunked\r\n", b"11\r\n" + b"x" * 17 + b"\r\n0\r\n\r\n"),
++    (b"Content-Encoding: gzip\r\n", b"gzip"),
++])
++def test_http_response_limits_reject_oversize_and_compressed_bodies(monkeypatch, headers, body):
++    class Writer:
++        def write(self, data):
++            return None
++        async def drain(self):
++            return None
++        def close(self):
++            return None
++
++    async def run():
++        reader = asyncio.StreamReader()
++        reader.feed_data(b"HTTP/1.1 200 OK\r\n" + headers + b"\r\n" + body)
++        reader.feed_eof()
++        monkeypatch.setattr(asyncio, "open_connection", AsyncMock(return_value=(reader, Writer())))
++        with pytest.raises(ValueError):
++            await link_embeds._response("https://example.com/", "example.com", 443, "93.184.216.34", 16)
++    asyncio.run(run())
++
++
++def test_total_preview_budget_and_thumbnail_ssrf_fail_closed(settings, monkeypatch):
++    settings.link_embed_timeout_seconds = 0.01
++    async def delayed(*args, **kwargs):
++        await asyncio.sleep(1)
++    monkeypatch.setattr(link_embeds, "safe_fetch", delayed)
++    assert asyncio.run(EmbedService(settings).build("https://example.com/page")) == []
++    real_fetch = safe_fetch
++    async def fetch(url, *args, **kwargs):
++        if url == "https://example.com/page":
++            return Fetched(url, "text/html", b'<title>Safe title</title><meta property="og:image" content="http://127.0.0.1/private">')
++        return await real_fetch(url, *args, **kwargs)
++    monkeypatch.setattr(link_embeds, "safe_fetch", fetch)
++    embed = asyncio.run(EmbedService(settings).build("https://example.com/page"))[0]
++    assert embed["title"] == "Safe title" and embed["image"] is None
++
++
++def test_embeds_parse_metadata_and_fail_closed_when_unavailable(settings, monkeypatch):
++    fetch = AsyncMock(return_value=Fetched("https://example.com/page", "text/html", b'<title>Fallback</title><meta property="og:title" content="School &amp; news"><meta name="description" content="Description"><meta property="og:site_name" content="Example">'))
++    monkeypatch.setattr(link_embeds, "safe_fetch", fetch)
++    embed = asyncio.run(EmbedService(settings).build("https://example.com/page"))[0]
++    assert embed["title"] == "School & news" and embed["description"] == "Description" and embed["site_name"] == "Example"
++    fetch.side_effect = TimeoutError()
++    fallback = asyncio.run(EmbedService(settings).build("https://example.com/page"))
++    assert fallback == [{"url": "https://example.com/page", "host": "example.com", "title": "example.com"}]
++    assert asyncio.run(EmbedService(settings).build("http://127.0.0.1/")) == []
++
++
++def test_embed_failure_does_not_prevent_message_send_and_success_is_encrypted(make_user, monkeypatch):
++    owner, _, channel = setup_channel(make_user)
++    fetch = AsyncMock(side_effect=TimeoutError())
++    monkeypatch.setattr(link_embeds, "safe_fetch", fetch)
++    assert owner.post(f"/channels/{channel}/messages", {"content": "https://example.com/page"}).status_code == 200
++    fetch.side_effect = None
++    fetch.return_value = Fetched("https://example.com/page", "text/html", b'<title>PRIVATE_PREVIEW_TITLE</title>')
++    sent = owner.post(f"/channels/{channel}/messages", {"content": "https://example.com/page"}).json()
++    assert sent["embeds"][0]["title"] == "PRIVATE_PREVIEW_TITLE"
++    assert "PRIVATE_PREVIEW_TITLE" not in database_dump(owner.app)
++    calls = fetch.await_count
++    history = owner.get(f"/channels/{channel}/messages").json()
++    assert history["messages"][-1]["embeds"] == sent["embeds"]
++    assert fetch.await_count == calls
++    vault = owner.app.state.vault
++    blob, key_id = seal_media(vault, "chat", 1, sent["embeds"])
++    assert open_media(vault, "chat", 2, blob, key_id)["embeds"] == []
+diff --git a/frontend/scripts/check-no-comments.d.mts b/frontend/scripts/check-no-comments.d.mts
+new file mode 100644
+index 0000000..3af1d63
+--- /dev/null
++++ b/frontend/scripts/check-no-comments.d.mts
+@@ -0,0 +1 @@
++export function findComments(): string[];
+diff --git a/frontend/src/api/client.ts b/frontend/src/api/client.ts
+index 8e26cbf..df65fb1 100644
+--- a/frontend/src/api/client.ts
++++ b/frontend/src/api/client.ts
+@@ -107,16 +107,78 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
+   return (await response.json()) as T;
+ }
+ 
++interface UploadOptions {
++  query?: RequestOptions["query"];
++  signal?: AbortSignal;
++  onProgress?: (percent: number) => void;
++}
++
++async function uploadProgress<T>(path: string, file: File, options: UploadOptions, retried = false): Promise<T> {
++  const csrf = await ensureCsrf();
++  if (options.signal?.aborted) {
++    throw new DOMException("Aborted", "AbortError");
++  }
++  const response = await new Promise<Response>((resolve, reject) => {
++    const xhr = new XMLHttpRequest();
++    const abort = () => xhr.abort();
++    const done = () => options.signal?.removeEventListener("abort", abort);
++    xhr.open("POST", buildUrl(path, options.query));
++    xhr.withCredentials = true;
++    xhr.timeout = 30 * 60 * 1000;
++    xhr.setRequestHeader("Accept", "application/json");
++    xhr.setRequestHeader("Accept-Language", i18n.language || "hu");
++    xhr.setRequestHeader("X-CSRF-Token", csrf);
++    xhr.upload.onprogress = (event) => {
++      if (event.lengthComputable) {
++        options.onProgress?.(Math.min(99, Math.round((event.loaded / event.total) * 100)));
++      }
++    };
++    xhr.onload = () => {
++      done();
++      if (!xhr.status) {
++        reject(new TypeError("network_error"));
++        return;
++      }
++      resolve(new Response(xhr.responseText, { status: xhr.status }));
++    };
++    xhr.onerror = xhr.ontimeout = () => {
++      done();
++      reject(new TypeError("network_error"));
++    };
++    xhr.onabort = () => {
++      done();
++      reject(new DOMException("Aborted", "AbortError"));
++    };
++    options.signal?.addEventListener("abort", abort, { once: true });
++    const form = new FormData();
++    form.append("file", file);
++    xhr.send(form);
++  });
++  if (!response.ok) {
++    const error = await toError(response);
++    if (error.code === "csrf_failed" && !retried) {
++      await ensureCsrf(true);
++      return uploadProgress<T>(path, file, options, true);
++    }
++    throw error;
++  }
++  options.onProgress?.(100);
++  return (await response.json()) as T;
++}
++
+ export const api = {
+   get: <T>(path: string, query?: RequestOptions["query"], signal?: AbortSignal) => request<T>(path, { query, signal }),
+   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body ?? {} }),
+   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: body ?? {} }),
+   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: body ?? {} }),
+   del: <T>(path: string, body?: unknown, query?: RequestOptions["query"]) => request<T>(path, { method: "DELETE", body, query }),
+-  upload: <T>(path: string, file: File) => {
++  upload: <T>(path: string, file: File, options?: UploadOptions) => {
++    if (options?.onProgress) {
++      return uploadProgress<T>(path, file, options);
++    }
+     const form = new FormData();
+     form.append("file", file);
+-    return request<T>(path, { method: "POST", form });
++    return request<T>(path, { method: "POST", form, query: options?.query, signal: options?.signal });
+   },
+ };
+ 
+diff --git a/frontend/src/api/giphy.ts b/frontend/src/api/giphy.ts
+new file mode 100644
+index 0000000..69513b9
+--- /dev/null
++++ b/frontend/src/api/giphy.ts
+@@ -0,0 +1,64 @@
++import { ApiError } from "./client";
++
++export interface GiphyItem {
++  id: string;
++  title: string;
++  url: string;
++  image: string;
++  preview: string;
++  attribution: string;
++}
++
++function mediaUrl(value: unknown): string | null {
++  if (typeof value !== "string") {
++    return null;
++  }
++  try {
++    const url = new URL(value);
++    return url.protocol === "https:" && !url.username && !url.password && !url.port && /^(media[0-9]*|i)\.giphy\.com$/.test(url.hostname) ? value : null;
++  } catch {
++    return null;
++  }
++}
++
++function item(value: any): GiphyItem | null {
++  if (!value || typeof value.id !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(value.id) || !["g", "pg"].includes(value.rating)) {
++    return null;
++  }
++  const image = mediaUrl(value.images?.downsized?.url) ?? mediaUrl(value.images?.fixed_width?.url);
++  const preview = mediaUrl(value.images?.fixed_width_small?.url) ?? image;
++  if (!image || !preview) {
++    return null;
++  }
++  return {
++    id: value.id, title: String(value.title || "GIF").slice(0, 200), url: `https://giphy.com/gifs/${value.id}`,
++    image, preview, attribution: String(value.user?.display_name || value.username || "GIPHY").slice(0, 100),
++  };
++}
++
++async function query(key: string, params: Record<string, string>, signal?: AbortSignal): Promise<GiphyItem[]> {
++  if (!key) {
++    return [];
++  }
++  const url = new URL(`https://api.giphy.com/v1/gifs${"q" in params ? "/search" : ""}`);
++  url.search = new URLSearchParams({ api_key: key, rating: "pg", ...params }).toString();
++  try {
++    const response = await fetch(url, { signal, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
++    if (!response.ok) {
++      throw new Error();
++    }
++    const payload = await response.json();
++    if (!Array.isArray(payload.data)) {
++      throw new Error();
++    }
++    return payload.data.map(item).filter((value: GiphyItem | null): value is GiphyItem => value !== null);
++  } catch (error) {
++    if (signal?.aborted) {
++      throw error;
++    }
++    throw new ApiError(503, "giphy_unavailable", "giphy_unavailable");
++  }
++}
++
++export const searchGiphy = (key: string, q: string, language: string, signal?: AbortSignal) => query(key, { q, lang: language.slice(0, 2), limit: "20" }, signal);
++export const loadGiphy = async (key: string, id: string, signal?: AbortSignal) => (await query(key, { ids: id }, signal))[0] ?? null;
+diff --git a/frontend/src/api/hooks.ts b/frontend/src/api/hooks.ts
+index 835a789..dca6ff9 100644
+--- a/frontend/src/api/hooks.ts
++++ b/frontend/src/api/hooks.ts
+@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+ 
+ import { useAuth } from "../store/auth";
+ import { canCreateForms } from "../utils/roles";
++import { useLinkPolicy } from "../utils/links";
+ import { api } from "./client";
+ import type {
+   AppNotification,
+@@ -17,13 +18,32 @@ import type {
+   FriendRequestEntry,
+   Member,
+   Meta,
++  MediaConfig,
+   ServerDetail,
+   ServerSummary,
+   UserCard,
+ } from "./types";
+ 
+ export function useMeta() {
+-  return useQuery({ queryKey: ["meta"], queryFn: () => api.get<Meta>("/meta"), staleTime: Infinity });
++  return useQuery({ queryKey: ["meta"], queryFn: async () => {
++    const meta = await api.get<Meta>("/meta");
++    if (meta.public_origin) {
++      useLinkPolicy.getState().setPublicOrigin(meta.public_origin);
++    }
++    return meta;
++  }, staleTime: Infinity });
++}
++
++export function useMediaConfig() {
++  const me = useAuth((state) => state.me);
++  return useQuery({
++    queryKey: ["media-config", me?.id, me?.platform_role], enabled: Boolean(me), retry: false,
++    queryFn: async () => {
++      const config = await api.get<MediaConfig>("/uploads/config");
++      useLinkPolicy.getState().setPublicOrigin(config.public_origin);
++      return config;
++    },
++  });
+ }
+ 
+ export function useServers() {
+diff --git a/frontend/src/api/types.ts b/frontend/src/api/types.ts
+index 1e68b79..55c4827 100644
+--- a/frontend/src/api/types.ts
++++ b/frontend/src/api/types.ts
+@@ -127,6 +127,41 @@ export interface Message {
+   reply_to: ReplyPreview | null;
+   pinned: boolean;
+   reactions: Reaction[];
++  attachments?: Attachment[];
++  embeds?: LinkEmbed[];
++  giphy_id?: string | null;
++}
++
++export interface Attachment {
++  id: Id;
++  filename: string;
++  size_bytes: number;
++  mime_type: string;
++  kind: "image" | "video" | "file";
++  url: string;
++}
++
++export interface LinkEmbed {
++  url: string;
++  host: string;
++  title: string;
++  description?: string;
++  site_name?: string;
++  image?: string | null;
++  icon?: string | null;
++}
++
++export interface MediaConfig {
++  public_origin: string;
++  max_attachment_bytes: number;
++  max_attachments: number;
++  giphy_api_key: string | null;
++  giphy_rating: "pg";
++}
++
++export interface MessageMediaInput {
++  attachmentIds: Id[];
++  giphyId: string | null;
+ }
+ 
+ export interface HistoryPage {
+@@ -271,6 +306,7 @@ export interface ReportEntry {
+ 
+ export interface Meta {
+   app_name: string;
++  public_origin?: string;
+   reactions: string[];
+   permissions: string[];
+   report_reasons: string[];
+@@ -327,6 +363,7 @@ export interface DokMessage {
+   mine: boolean;
+   content: string;
+   created_at: string;
++  embeds?: LinkEmbed[];
+ }
+ 
+ export interface DokHistoryPage {
+@@ -371,6 +408,7 @@ export interface ClassSpaceMessage {
+   mine: boolean;
+   content: string;
+   created_at: string;
++  embeds?: LinkEmbed[];
+ }
+ 
+ export interface ClassSpaceHistoryPage {
+diff --git a/frontend/src/components/SafeLink.tsx b/frontend/src/components/SafeLink.tsx
+new file mode 100644
+index 0000000..8e4ec59
+--- /dev/null
++++ b/frontend/src/components/SafeLink.tsx
+@@ -0,0 +1,45 @@
++import { useState, type ReactNode } from "react";
++import { useTranslation } from "react-i18next";
++
++import { isExternalUrl, useLinkPolicy } from "../utils/links";
++import { isSafeUrl } from "../utils/text";
++import { Modal } from "./Modal";
++
++export function SafeLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
++  const { t } = useTranslation();
++  const publicOrigin = useLinkPolicy((state) => state.publicOrigin);
++  const [pending, setPending] = useState(false);
++  if (!isSafeUrl(href)) {
++    return <span>{children}</span>;
++  }
++  const external = isExternalUrl(href, publicOrigin ?? window.location.origin);
++  const activate = (event: React.MouseEvent<HTMLAnchorElement>) => {
++    if (external) {
++      event.preventDefault();
++      event.stopPropagation();
++      setPending(true);
++    }
++  };
++  return (
++    <>
++      <a href={href} className={className} target="_blank" rel="noopener noreferrer nofollow ugc" onClick={activate} onAuxClick={(event) => event.button === 1 && activate(event)} onContextMenu={(event) => external && activate(event)} draggable={false}>
++        {children}
++      </a>
++      {pending ? (
++        <Modal
++          title={t("media.external_title")}
++          onClose={() => setPending(false)}
++          footer={
++            <>
++              <button type="button" className="button" data-autofocus onClick={() => setPending(false)}>{t("common.cancel")}</button>
++              <a className="button button--primary" href={href} target="_blank" rel="noopener noreferrer" onClick={() => setPending(false)}>{t("media.continue")}</a>
++            </>
++          }
++        >
++          <p>{t("media.external_warning")}</p>
++          <p className="external-link-url" dir="auto">{href}</p>
++        </Modal>
++      ) : null}
++    </>
++  );
++}
+diff --git a/frontend/src/components/chat/Composer.tsx b/frontend/src/components/chat/Composer.tsx
+index b26d697..0f2c02c 100644
+--- a/frontend/src/components/chat/Composer.tsx
++++ b/frontend/src/components/chat/Composer.tsx
+@@ -1,12 +1,15 @@
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useTranslation } from "react-i18next";
+ 
+-import type { Message } from "../../api/types";
++import type { MediaConfig, Message, MessageMediaInput } from "../../api/types";
+ import { realtime } from "../../realtime/socket";
+ import { encodeMentions } from "../../utils/text";
+ import { Avatar } from "../Avatar";
+ import { ErrorText } from "../ErrorText";
+ import { Icon } from "../Icon";
++import { GiphyPicker } from "./GiphyPicker";
++import { formatFileSize } from "./MessageMedia";
++import { useComposerMedia } from "./useComposerMedia";
+ 
+ export interface MentionCandidate {
+   id: string;
+@@ -21,13 +24,14 @@ interface ComposerProps {
+   typingTarget: { scope: "dm" | "channel"; id: string };
+   replyTo: Message | null;
+   onCancelReply: () => void;
+-  onSend: (content: string, replyTo: string | null) => Promise<void>;
++  onSend: (content: string, replyTo: string | null, media?: MessageMediaInput) => Promise<void>;
+   candidates: MentionCandidate[];
++  mediaConfig?: MediaConfig;
+ }
+ 
+ const TYPING_INTERVAL_MS = 3000;
+ 
+-export function Composer({ placeholder, disabledReason, maxLength, typingTarget, replyTo, onCancelReply, onSend, candidates }: ComposerProps) {
++export function Composer({ placeholder, disabledReason, maxLength, typingTarget, replyTo, onCancelReply, onSend, candidates, mediaConfig }: ComposerProps) {
+   const { t } = useTranslation();
+   const [text, setText] = useState("");
+   const [error, setError] = useState<unknown>(null);
+@@ -35,12 +39,18 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
+   const [picks, setPicks] = useState<Record<string, string>>({});
+   const [cursor, setCursor] = useState(0);
+   const [active, setActive] = useState(0);
++  const [giphyOpen, setGiphyOpen] = useState(false);
++  const media = useComposerMedia(typingTarget, mediaConfig);
++  const fileInput = useRef<HTMLInputElement>(null);
++  const currentTarget = useRef(typingTarget.id);
++  currentTarget.current = typingTarget.id;
+   const area = useRef<HTMLTextAreaElement>(null);
+   const lastTyping = useRef(0);
+ 
+   useEffect(() => {
+     setText("");
+     setPicks({});
++    setGiphyOpen(false);
+   }, [typingTarget.id]);
+ 
+   useEffect(() => {
+@@ -92,16 +102,25 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
+ 
+   const submit = async () => {
+     const content = encodeMentions(text.trim(), picks);
+-    if (!content || busy || disabledReason) {
++    const hasMedia = media.attachments.length > 0 || Boolean(media.giphyId);
++    if ((!content && !hasMedia) || busy || media.uploading || disabledReason) {
+       return;
+     }
++    const target = typingTarget.id;
+     setBusy(true);
+     setError(null);
+     try {
+-      await onSend(content, replyTo?.id ?? null);
+-      setText("");
+-      setPicks({});
+-      onCancelReply();
++      if (hasMedia) {
++        await onSend(content, replyTo?.id ?? null, { attachmentIds: media.attachments.map((file) => file.id), giphyId: media.giphyId });
++      } else {
++        await onSend(content, replyTo?.id ?? null);
++      }
++      if (currentTarget.current === target) {
++        media.commit();
++        setText("");
++        setPicks({});
++        onCancelReply();
++      }
+     } catch (failure) {
+       setError(failure);
+     } finally {
+@@ -153,6 +172,17 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
+         </ul>
+       ) : null}
+       <div className="composer__row">
++        {mediaConfig ? (
++          <>
++            <input ref={fileInput} type="file" multiple hidden aria-label={t("media.attach")} onChange={(event) => {
++              const files = Array.from(event.target.files ?? []);
++              event.target.value = "";
++              void media.selectFiles(files);
++            }} />
++            <button type="button" className="icon-button" onClick={() => fileInput.current?.click()} disabled={busy || media.uploading || Boolean(disabledReason)} aria-label={t("media.attach")} title={t("media.attach")}><Icon name="plus" /></button>
++            {mediaConfig.giphy_api_key ? <button type="button" className="button button--small button--ghost" disabled={busy || media.uploading || Boolean(disabledReason)} onClick={() => setGiphyOpen(true)} aria-label={t("media.giphy_title")}>GIF</button> : null}
++          </>
++        ) : null}
+         <label className="sr-only" htmlFor="composer-input">
+           {placeholder}
+         </label>
+@@ -163,7 +193,7 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
+           value={text}
+           maxLength={maxLength}
+           placeholder={disabledReason ?? placeholder}
+-          disabled={Boolean(disabledReason)}
++          disabled={busy || Boolean(disabledReason)}
+           onChange={(event) => {
+             setText(event.target.value);
+             setCursor(event.target.selectionStart);
+@@ -174,15 +204,25 @@ export function Composer({ placeholder, disabledReason, maxLength, typingTarget,
+           onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
+           onKeyDown={onKeyDown}
+         />
+-        <button type="button" className="button button--primary composer__send" onClick={() => void submit()} disabled={busy || !text.trim() || Boolean(disabledReason)} aria-label={t("message.send")}>
++        <button type="button" className="button button--primary composer__send" onClick={() => void submit()} disabled={busy || media.uploading || (!text.trim() && media.attachments.length === 0 && !media.giphyId) || Boolean(disabledReason)} aria-label={t("message.send")}>
+           <Icon name="send" />
+         </button>
+       </div>
++      {media.attachments.length > 0 || media.giphyId ? (
++        <ul className="composer-attachments" aria-label={t("media.pending")}>
++          {media.attachments.map((file) => <li key={file.id}><span>{file.filename} · {formatFileSize(file.size_bytes)} · {file.mime_type}</span><button type="button" className="icon-button" disabled={busy} onClick={() => media.remove(file.id)} aria-label={t("media.remove", { filename: file.filename })}><Icon name="close" size={16} /></button></li>)}
++          {media.giphyId ? <li><span>{t("media.giphy_selected")}</span><button type="button" className="icon-button" disabled={busy} onClick={() => media.setGiphyId(null)} aria-label={t("media.remove_gif")}><Icon name="close" size={16} /></button></li> : null}
++        </ul>
++      ) : null}
++      {media.progress ? <div className="composer-upload" role="status"><label htmlFor="attachment-progress">{t("media.uploading", { filename: media.progress.filename, percent: media.progress.percent })}</label><progress id="attachment-progress" max={100} value={media.progress.percent} /></div> : null}
+       <div className="composer__meta">
+         <span className="muted">{t("message.composer_hint")}</span>
++        {mediaConfig ? <span className="muted">{t("media.limit", { size: formatFileSize(mediaConfig.max_attachment_bytes) })}</span> : null}
+         {remaining < 200 ? <span className={remaining < 0 ? "form-error" : "muted"}>{remaining}</span> : null}
+       </div>
+       <ErrorText error={error} />
++      <ErrorText error={media.error} />
++      {giphyOpen && mediaConfig?.giphy_api_key ? <GiphyPicker apiKey={mediaConfig.giphy_api_key} onClose={() => setGiphyOpen(false)} onChoose={(id) => { media.setGiphyId(id); setGiphyOpen(false); }} /> : null}
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/chat/GiphyPicker.tsx b/frontend/src/components/chat/GiphyPicker.tsx
+new file mode 100644
+index 0000000..9741f01
+--- /dev/null
++++ b/frontend/src/components/chat/GiphyPicker.tsx
+@@ -0,0 +1,59 @@
++import { useEffect, useRef, useState } from "react";
++import { useTranslation } from "react-i18next";
++
++import { searchGiphy, type GiphyItem } from "../../api/giphy";
++import { ErrorText } from "../ErrorText";
++import { Modal } from "../Modal";
++
++export function GiphyPicker({ apiKey, onChoose, onClose }: { apiKey: string; onChoose: (id: string) => void; onClose: () => void }) {
++  const { t, i18n } = useTranslation();
++  const [query, setQuery] = useState("");
++  const [items, setItems] = useState<GiphyItem[]>([]);
++  const [error, setError] = useState<unknown>(null);
++  const [busy, setBusy] = useState(false);
++  const [searched, setSearched] = useState(false);
++  const controller = useRef<AbortController | null>(null);
++  useEffect(() => () => controller.current?.abort(), []);
++  const search = async (event: React.FormEvent) => {
++    event.preventDefault();
++    if (!query.trim() || busy) {
++      return;
++    }
++    controller.current?.abort();
++    const next = new AbortController();
++    controller.current = next;
++    const timeout = window.setTimeout(() => next.abort(), 10000);
++    setBusy(true);
++    setError(null);
++    try {
++      setItems(await searchGiphy(apiKey, query, i18n.language, next.signal));
++      setSearched(true);
++    } catch (failure) {
++      setError(failure);
++    } finally {
++      window.clearTimeout(timeout);
++      setBusy(false);
++    }
++  };
++  return (
++    <Modal title={t("media.giphy_title")} onClose={onClose} wide>
++      <form className="giphy-search" onSubmit={(event) => void search(event)}>
++        <label htmlFor="giphy-search">{t("media.giphy_search")}</label>
++        <input id="giphy-search" value={query} maxLength={50} onChange={(event) => setQuery(event.target.value)} data-autofocus />
++        <button type="submit" className="button button--primary" disabled={busy || !query.trim()}>{t("media.search")}</button>
++      </form>
++      <p className="muted">{t("media.giphy_rating")}</p>
++      <ErrorText error={error} />
++      <div className="giphy-grid" aria-busy={busy}>
++        {items.map((gif) => (
++          <button type="button" key={gif.id} className="giphy-result" onClick={() => onChoose(gif.id)} aria-label={t("media.giphy_insert", { title: gif.title })}>
++            <img src={gif.preview} alt={gif.title} loading="lazy" referrerPolicy="no-referrer" />
++            <span>{gif.attribution}</span>
++          </button>
++        ))}
++      </div>
++      {searched && !busy && items.length === 0 ? <p role="status">{t("media.giphy_empty")}</p> : null}
++      <p className="giphy-attribution">{t("media.giphy_powered")}</p>
++    </Modal>
++  );
++}
+diff --git a/frontend/src/components/chat/MessageItem.tsx b/frontend/src/components/chat/MessageItem.tsx
+index 8b95f7f..bb34f73 100644
+--- a/frontend/src/components/chat/MessageItem.tsx
++++ b/frontend/src/components/chat/MessageItem.tsx
+@@ -9,6 +9,7 @@ import { Avatar } from "../Avatar";
+ import { CopyId } from "../CopyId";
+ import { Icon } from "../Icon";
+ import { RichText } from "./RichText";
++import { MessageMedia } from "./MessageMedia";
+ 
+ interface MessageItemProps {
+   message: Message;
+@@ -84,6 +85,7 @@ export function MessageItem(props: MessageItemProps) {
+           <div className="message__content">
+             <RichText content={message.content ?? ""} names={names} />
+           </div>
++          <MessageMedia attachments={message.attachments} embeds={message.embeds} giphyId={message.giphy_id} />
+           {message.reactions.length > 0 ? (
+             <div className="message__reactions">
+               {message.reactions.map((reaction) => (
+diff --git a/frontend/src/components/chat/MessageMedia.tsx b/frontend/src/components/chat/MessageMedia.tsx
+new file mode 100644
+index 0000000..acaed2c
+--- /dev/null
++++ b/frontend/src/components/chat/MessageMedia.tsx
+@@ -0,0 +1,94 @@
++import { useEffect, useState } from "react";
++import { useTranslation } from "react-i18next";
++
++import { useMediaConfig } from "../../api/hooks";
++import { loadGiphy, type GiphyItem } from "../../api/giphy";
++import type { Attachment, LinkEmbed } from "../../api/types";
++import { SafeLink } from "../SafeLink";
++
++export function formatFileSize(size: number): string {
++  return size >= 1_000_000 ? `${(size / 1_000_000).toFixed(1)} MB` : size >= 1000 ? `${(size / 1000).toFixed(1)} kB` : `${size} B`;
++}
++
++function previewImage(value: string | null | undefined): string | undefined {
++  return value && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value) ? value : undefined;
++}
++
++export function LinkEmbeds({ embeds = [] }: { embeds?: LinkEmbed[] }) {
++  return (
++    <div className="link-embeds">
++      {embeds.map((embed, index) => (
++        <SafeLink key={`${index}:${embed.url}`} href={embed.url} className="link-embed">
++          <span className="link-embed__body">
++            <span className="link-embed__host">{previewImage(embed.icon) ? <img src={previewImage(embed.icon)} alt="" width={20} height={20} /> : null}{embed.site_name || embed.host}</span>
++            <strong>{embed.title || embed.host}</strong>
++            {embed.description ? <span className="link-embed__description">{embed.description}</span> : null}
++            {embed.site_name ? <span className="muted">{embed.host}</span> : null}
++          </span>
++          {previewImage(embed.image) ? <img className="link-embed__image" src={previewImage(embed.image)} alt="" loading="lazy" /> : null}
++        </SafeLink>
++      ))}
++    </div>
++  );
++}
++
++function GiphyGif({ id }: { id: string }) {
++  const { t } = useTranslation();
++  const config = useMediaConfig();
++  const key = config.data?.giphy_api_key;
++  const [gif, setGif] = useState<GiphyItem | null>(null);
++  const [failed, setFailed] = useState(false);
++  useEffect(() => {
++    setGif(null);
++    setFailed(false);
++    if (!key) {
++      return;
++    }
++    const controller = new AbortController();
++    const timeout = window.setTimeout(() => controller.abort(), 10000);
++    void loadGiphy(key, id, controller.signal).then((result) => {
++      if (!controller.signal.aborted) {
++        setGif(result);
++        setFailed(!result);
++      }
++    }).catch(() => setFailed(true));
++    return () => {
++      window.clearTimeout(timeout);
++      controller.abort();
++    };
++  }, [key, id]);
++  if (!gif || failed) {
++    return <p className="muted">{failed || !key ? t("media.giphy_unavailable") : t("common.loading")}</p>;
++  }
++  return (
++    <figure className="message-gif">
++      <SafeLink href={gif.url}><img src={gif.image} alt={gif.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /></SafeLink>
++      <figcaption>{t("media.giphy_powered")} · {gif.attribution}</figcaption>
++    </figure>
++  );
++}
++
++export function MessageMedia({ attachments = [], embeds, giphyId }: { attachments?: Attachment[]; embeds?: LinkEmbed[]; giphyId?: string | null }) {
++  const { t } = useTranslation();
++  return (
++    <>
++      {attachments.map((file) => {
++        if (!/^\/api\/v1\/uploads\/attachments\/\d+$/.test(file.url)) {
++          return null;
++        }
++        return (
++          <div key={file.id} className="message-attachment">
++            {file.kind === "image" ? <a href={file.url} target="_blank" rel="noopener noreferrer"><img src={`${file.url}?inline=true`} alt={file.filename} loading="lazy" /></a> : null}
++            {file.kind === "video" ? <video src={`${file.url}?inline=true`} controls preload="metadata" aria-label={file.filename} /> : null}
++            <a className="message-attachment__download" href={file.url} download={file.filename}>
++              <strong>{file.filename}</strong>
++              <span>{formatFileSize(file.size_bytes)} · {file.mime_type} · {t("media.download")}</span>
++            </a>
++          </div>
++        );
++      })}
++      {giphyId ? <GiphyGif id={giphyId} /> : null}
++      <LinkEmbeds embeds={embeds} />
++    </>
++  );
++}
+diff --git a/frontend/src/components/chat/MessageTimeline.tsx b/frontend/src/components/chat/MessageTimeline.tsx
+index 537b347..cb7796e 100644
+--- a/frontend/src/components/chat/MessageTimeline.tsx
++++ b/frontend/src/components/chat/MessageTimeline.tsx
+@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
+ import { useTranslation } from "react-i18next";
+ 
+ import { api } from "../../api/client";
+-import { useMeta } from "../../api/hooks";
++import { useMediaConfig, useMeta } from "../../api/hooks";
+ import type { Message } from "../../api/types";
+ import { useAuth } from "../../store/auth";
+ import { useLive } from "../../store/live";
+@@ -42,6 +42,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
+   const push = useUi((state) => state.push);
+   const meId = useAuth((state) => state.me?.id);
+   const meta = useMeta();
++  const mediaConfig = useMediaConfig();
+   const typing = useLive((state) => state.typing[`${scope}:${id}`]);
+   const [tick, setTick] = useState(0);
+   const [replyTo, setReplyTo] = useState<Message | null>(null);
+@@ -227,6 +228,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
+         onCancelReply={() => setReplyTo(null)}
+         onSend={timeline.send}
+         candidates={candidates}
++        mediaConfig={mediaConfig.data}
+       />
+       {reporting ? <ReportDialog base={timeline.base} messageId={reporting.id} allowEscalate={allowEscalate} onClose={() => setReporting(null)} /> : null}
+       {deleting ? (
+diff --git a/frontend/src/components/chat/RichText.tsx b/frontend/src/components/chat/RichText.tsx
+index a91f652..2119379 100644
+--- a/frontend/src/components/chat/RichText.tsx
++++ b/frontend/src/components/chat/RichText.tsx
+@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
+ 
+ import { useUi } from "../../store/ui";
+ import { isSafeUrl, tokenizeMessage } from "../../utils/text";
++import { SafeLink } from "../SafeLink";
+ 
+ export function RichText({ content, names }: { content: string; names: Record<string, string> }) {
+   const { t } = useTranslation();
+@@ -19,9 +20,9 @@ export function RichText({ content, names }: { content: string; names: Record<st
+         }
+         if (part.type === "link" && isSafeUrl(part.value)) {
+           return (
+-            <a key={index} href={part.value} target="_blank" rel="noopener noreferrer nofollow ugc">
++            <SafeLink key={index} href={part.value}>
+               {part.value}
+-            </a>
++            </SafeLink>
+           );
+         }
+         return <span key={index}>{part.type === "text" ? part.value : part.type === "link" ? part.value : ""}</span>;
+diff --git a/frontend/src/components/chat/useComposerMedia.ts b/frontend/src/components/chat/useComposerMedia.ts
+new file mode 100644
+index 0000000..78c4fca
+--- /dev/null
++++ b/frontend/src/components/chat/useComposerMedia.ts
+@@ -0,0 +1,90 @@
++import { useEffect, useRef, useState } from "react";
++
++import { ApiError, api } from "../../api/client";
++import type { Attachment, MediaConfig } from "../../api/types";
++
++export function useComposerMedia(target: { scope: "dm" | "channel"; id: string }, config: MediaConfig | undefined) {
++  const [attachments, setAttachments] = useState<Attachment[]>([]);
++  const [giphyId, setGiphyId] = useState<string | null>(null);
++  const [uploading, setUploading] = useState(false);
++  const [progress, setProgress] = useState<{ filename: string; percent: number } | null>(null);
++  const [error, setError] = useState<unknown>(null);
++  const pending = useRef(new Set<string>());
++  const controller = useRef<AbortController | null>(null);
++  const generation = useRef(0);
++
++  useEffect(() => {
++    setAttachments([]);
++    setGiphyId(null);
++    setUploading(false);
++    setProgress(null);
++    setError(null);
++    return () => {
++      generation.current += 1;
++      controller.current?.abort();
++      controller.current = null;
++      for (const id of pending.current) {
++        void api.del(`/uploads/attachments/${id}`).catch(() => undefined);
++      }
++      pending.current.clear();
++    };
++  }, [target.scope, target.id]);
++
++  const selectFiles = async (files: File[]) => {
++    if (!config || controller.current || files.length === 0) {
++      return;
++    }
++    setError(null);
++    if (pending.current.size + files.length > config.max_attachments) {
++      setError(new ApiError(422, "attachment_limit_reached", "attachment_limit_reached", { max: config.max_attachments }));
++      return;
++    }
++    if (files.some((file) => file.size > config.max_attachment_bytes)) {
++      setError(new ApiError(413, "file_too_large", "file_too_large", { max_bytes: config.max_attachment_bytes }));
++      return;
++    }
++    const current = generation.current;
++    const next = new AbortController();
++    controller.current = next;
++    setUploading(true);
++    try {
++      for (const file of files) {
++        setProgress({ filename: file.name, percent: 0 });
++        const uploaded = await api.upload<Attachment>("/uploads/attachments", file, {
++          query: { scope: target.scope, scope_id: target.id }, signal: next.signal,
++          onProgress: (percent) => current === generation.current && setProgress({ filename: file.name, percent }),
++        });
++        if (current !== generation.current) {
++          void api.del(`/uploads/attachments/${uploaded.id}`).catch(() => undefined);
++          return;
++        }
++        pending.current.add(uploaded.id);
++        setAttachments((items) => [...items, uploaded]);
++      }
++    } catch (failure) {
++      if (current === generation.current && !next.signal.aborted) {
++        setError(failure);
++      }
++    } finally {
++      if (current === generation.current) {
++        controller.current = null;
++        setUploading(false);
++        setProgress(null);
++      }
++    }
++  };
++
++  const remove = (id: string) => {
++    pending.current.delete(id);
++    setAttachments((items) => items.filter((item) => item.id !== id));
++    void api.del(`/uploads/attachments/${id}`).catch(() => undefined);
++  };
++
++  const commit = () => {
++    pending.current.clear();
++    setAttachments([]);
++    setGiphyId(null);
++  };
++
++  return { attachments, giphyId, setGiphyId, uploading, progress, error, selectFiles, remove, commit };
++}
+diff --git a/frontend/src/components/chat/useTimeline.ts b/frontend/src/components/chat/useTimeline.ts
+index c1f33d2..00257e6 100644
+--- a/frontend/src/components/chat/useTimeline.ts
++++ b/frontend/src/components/chat/useTimeline.ts
+@@ -1,7 +1,7 @@
+ import { useCallback, useEffect, useRef, useState } from "react";
+ 
+ import { api } from "../../api/client";
+-import type { HistoryPage, Id, Message } from "../../api/types";
++import type { HistoryPage, Id, Message, MessageMediaInput } from "../../api/types";
+ import { realtime } from "../../realtime/socket";
+ import { useRealtimeEvent } from "../../realtime/useRealtimeEvent";
+ import { useAuth } from "../../store/auth";
+@@ -85,7 +85,7 @@ export function useTimeline(scope: Scope, id: Id, onRead: () => void) {
+     }
+     setMessages((current) =>
+       current.map((m) =>
+-        m.id === event.id ? { ...m, deleted: true, content: null, reactions: [], pinned: false } : m.reply_to?.id === event.id ? { ...m, reply_to: { ...m.reply_to, deleted: true, preview: null } } : m,
++        m.id === event.id ? { ...m, deleted: true, content: null, reactions: [], pinned: false, attachments: [], embeds: [], giphy_id: null } : m.reply_to?.id === event.id ? { ...m, reply_to: { ...m.reply_to, deleted: true, preview: null } } : m,
+       ),
+     );
+   });
+@@ -137,8 +137,8 @@ export function useTimeline(scope: Scope, id: Id, onRead: () => void) {
+   }, [base, messages, loadingOlder]);
+ 
+   const send = useCallback(
+-    async (content: string, replyTo: Id | null) => {
+-      const message = await api.post<Message>(`${base}/messages`, { content, reply_to_id: replyTo });
++    async (content: string, replyTo: Id | null, media?: MessageMediaInput) => {
++      const message = await api.post<Message>(`${base}/messages`, { content, reply_to_id: replyTo, ...(media ? { attachment_ids: media.attachmentIds, giphy_id: media.giphyId } : {}) });
+       setMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
+     },
+     [base],
+diff --git a/frontend/src/components/classspace/ClassSpaceMessageItem.tsx b/frontend/src/components/classspace/ClassSpaceMessageItem.tsx
+index 9ea2a55..7943fa3 100644
+--- a/frontend/src/components/classspace/ClassSpaceMessageItem.tsx
++++ b/frontend/src/components/classspace/ClassSpaceMessageItem.tsx
+@@ -6,6 +6,7 @@ import { formatDateTime, formatTime } from "../../utils/format";
+ import { Avatar } from "../Avatar";
+ import { Icon } from "../Icon";
+ import { ClassSpaceText } from "./ClassSpaceText";
++import { LinkEmbeds } from "../chat/MessageMedia";
+ 
+ interface ClassSpaceMessageItemProps {
+   message: ClassSpaceMessage;
+@@ -36,6 +37,7 @@ export function ClassSpaceMessageItem({ message, onDelete, onReport }: ClassSpac
+           <div className="message__content">
+             <ClassSpaceText content={message.content} />
+           </div>
++          <LinkEmbeds embeds={message.embeds} />
+         </div>
+         <div className="message__tools" role="toolbar" aria-label={t("a11y.message_actions")}>
+           {message.mine ? (
+diff --git a/frontend/src/components/classspace/ClassSpaceText.tsx b/frontend/src/components/classspace/ClassSpaceText.tsx
+index 9fa589c..e7ee327 100644
+--- a/frontend/src/components/classspace/ClassSpaceText.tsx
++++ b/frontend/src/components/classspace/ClassSpaceText.tsx
+@@ -1,4 +1,5 @@
+ import { isSafeUrl, tokenizeMessage } from "../../utils/text";
++import { SafeLink } from "../SafeLink";
+ 
+ export function ClassSpaceText({ content }: { content: string }) {
+   return (
+@@ -6,9 +7,9 @@ export function ClassSpaceText({ content }: { content: string }) {
+       {tokenizeMessage(content).map((part, index) => {
+         if (part.type === "link" && isSafeUrl(part.value)) {
+           return (
+-            <a key={index} href={part.value} target="_blank" rel="noopener noreferrer nofollow ugc">
++            <SafeLink key={index} href={part.value}>
+               {part.value}
+-            </a>
++            </SafeLink>
+           );
+         }
+         return <span key={index}>{part.type === "mention" ? `<@${part.userId}>` : part.value}</span>;
+diff --git a/frontend/src/components/dok/DokMessageItem.tsx b/frontend/src/components/dok/DokMessageItem.tsx
+index a8a1eea..c8033bb 100644
+--- a/frontend/src/components/dok/DokMessageItem.tsx
++++ b/frontend/src/components/dok/DokMessageItem.tsx
+@@ -5,6 +5,7 @@ import { roleLabel } from "../../utils/dok";
+ import { formatDateTime, formatTime } from "../../utils/format";
+ import { Icon } from "../Icon";
+ import { DokText } from "./DokText";
++import { LinkEmbeds } from "../chat/MessageMedia";
+ 
+ export function DokMessageItem({ message }: { message: DokMessage }) {
+   const { t } = useTranslation();
+@@ -30,6 +31,7 @@ export function DokMessageItem({ message }: { message: DokMessage }) {
+           <div className="message__content">
+             <DokText content={message.content} />
+           </div>
++          <LinkEmbeds embeds={message.embeds} />
+         </div>
+       </div>
+     </article>
+diff --git a/frontend/src/components/dok/DokText.tsx b/frontend/src/components/dok/DokText.tsx
+index 921b590..0fde5ba 100644
+--- a/frontend/src/components/dok/DokText.tsx
++++ b/frontend/src/components/dok/DokText.tsx
+@@ -1,4 +1,5 @@
+ import { isSafeUrl, tokenizeMessage } from "../../utils/text";
++import { SafeLink } from "../SafeLink";
+ 
+ export function DokText({ content }: { content: string }) {
+   return (
+@@ -6,9 +7,9 @@ export function DokText({ content }: { content: string }) {
+       {tokenizeMessage(content).map((part, index) => {
+         if (part.type === "link" && isSafeUrl(part.value)) {
+           return (
+-            <a key={index} href={part.value} target="_blank" rel="noopener noreferrer nofollow ugc">
++            <SafeLink key={index} href={part.value}>
+               {part.value}
+-            </a>
++            </SafeLink>
+           );
+         }
+         return <span key={index}>{part.type === "mention" ? `<@${part.userId}>` : part.value}</span>;
+diff --git a/frontend/src/components/layout/AppShell.tsx b/frontend/src/components/layout/AppShell.tsx
+index f9147db..f6ef138 100644
+--- a/frontend/src/components/layout/AppShell.tsx
++++ b/frontend/src/components/layout/AppShell.tsx
+@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
+ import { Navigate, Outlet, useLocation, useMatch } from "react-router-dom";
+ 
+ import { useAuth } from "../../store/auth";
++import { useMeta } from "../../api/hooks";
+ import { useUi } from "../../store/ui";
+ import { ClassSpacePrompt } from "../classspace/ClassSpacePrompt";
+ import { Spinner } from "../EmptyState";
+@@ -18,6 +19,7 @@ import { VoiceDock } from "./VoiceDock";
+ 
+ function ShellLayout() {
+   const { t } = useTranslation();
++  useMeta();
+   const location = useLocation();
+   const serverMatch = useMatch("/app/server/:serverId/*");
+   const drawerOpen = useUi((state) => state.drawerOpen);
+diff --git a/frontend/src/i18n/locales/de.json b/frontend/src/i18n/locales/de.json
+index 3deb70c..da02a5d 100644
+--- a/frontend/src/i18n/locales/de.json
++++ b/frontend/src/i18n/locales/de.json
+@@ -381,7 +381,11 @@
+     "username_reserved": "Dieser Benutzername ist reserviert.",
+     "username_taken": "Dieser Benutzername ist bereits vergeben.",
+     "validation_error": "Die übermittelten Daten sind ungültig.",
+-    "voice_channel_full": "Der Sprachkanal ist voll."
++    "voice_channel_full": "Der Sprachkanal ist voll.",
++    "attachment_invalid": "Dieser Anhang ist ungültig, abgelaufen oder gehört zu einem anderen Gespräch.",
++    "attachment_limit_reached": "Du kannst bis zu {{max}} Dateien an eine Nachricht anhängen.",
++    "giphy_disabled": "Die GIF-Suche ist derzeit deaktiviert.",
++    "giphy_unavailable": "GIPHY ist momentan nicht erreichbar. Versuche es später erneut."
+   },
+   "forms": {
+     "add_option": "Option hinzufügen",
+@@ -1003,5 +1007,26 @@
+     "verify_note": "Wenn die Codes abweichen, beende den Anruf und informiere die Moderation.",
+     "verify_pending": "Warte auf die Verbindung …",
+     "verify_title": "Sicherheitscode"
++  },
++  "media": {
++    "external_title": "Externe Website öffnen",
++    "external_warning": "Dieser Link öffnet eine Website außerhalb von PollákCord. Sie kann unsicher sein und Phishing, Schadsoftware oder irreführende Inhalte enthalten. Fahre nur fort, wenn du der Adresse vertraust.",
++    "continue": "In neuem Tab fortfahren",
++    "attach": "Datei anhängen",
++    "pending": "Angehängte Dateien und GIF",
++    "remove": "{{filename}} entfernen",
++    "remove_gif": "GIF entfernen",
++    "uploading": "{{filename}} wird hochgeladen: {{percent}}%",
++    "limit": "Bis zu {{size}} pro Datei",
++    "download": "Herunterladen",
++    "giphy_title": "GIPHY-GIFs suchen",
++    "giphy_search": "GIF-Suchbegriff",
++    "search": "Suchen",
++    "giphy_rating": "Schulfilter: höchstens Altersfreigabe PG.",
++    "giphy_insert": "GIF {{title}} einfügen",
++    "giphy_empty": "Keine Ergebnisse. Versuche einen anderen Suchbegriff.",
++    "giphy_powered": "Powered by GIPHY",
++    "giphy_selected": "GIPHY-GIF ausgewählt",
++    "giphy_unavailable": "Dieses GIF kann gerade nicht angezeigt werden."
+   }
+ }
+diff --git a/frontend/src/i18n/locales/en.json b/frontend/src/i18n/locales/en.json
+index a4407ca..9284d20 100644
+--- a/frontend/src/i18n/locales/en.json
++++ b/frontend/src/i18n/locales/en.json
+@@ -381,7 +381,11 @@
+     "username_reserved": "This username is reserved.",
+     "username_taken": "This username is already taken.",
+     "validation_error": "The submitted data is invalid.",
+-    "voice_channel_full": "The voice channel is full."
++    "voice_channel_full": "The voice channel is full.",
++    "attachment_invalid": "This attachment is invalid, expired, or belongs to a different conversation.",
++    "attachment_limit_reached": "You can attach up to {{max}} files to a message.",
++    "giphy_disabled": "GIF search is currently disabled.",
++    "giphy_unavailable": "GIPHY is unavailable. Please try again later."
+   },
+   "forms": {
+     "add_option": "Add option",
+@@ -1003,5 +1007,26 @@
+     "verify_note": "If the codes differ, end the call and tell the moderators.",
+     "verify_pending": "Waiting for the connection…",
+     "verify_title": "Security code"
++  },
++  "media": {
++    "external_title": "Open an external website",
++    "external_warning": "This link opens a website outside PollákCord. It may be unsafe and could contain phishing, malware, or misleading content. Continue only if you trust the address.",
++    "continue": "Continue in new tab",
++    "attach": "Attach a file",
++    "pending": "Attached files and GIF",
++    "remove": "Remove {{filename}}",
++    "remove_gif": "Remove GIF",
++    "uploading": "Uploading {{filename}}: {{percent}}%",
++    "limit": "Up to {{size}} per file",
++    "download": "Download",
++    "giphy_title": "Search GIPHY GIFs",
++    "giphy_search": "GIF search term",
++    "search": "Search",
++    "giphy_rating": "School filter: PG rating or lower.",
++    "giphy_insert": "Insert {{title}} GIF",
++    "giphy_empty": "No results. Try another search term.",
++    "giphy_powered": "Powered by GIPHY",
++    "giphy_selected": "GIPHY GIF selected",
++    "giphy_unavailable": "This GIF cannot be displayed right now."
+   }
+ }
+diff --git a/frontend/src/i18n/locales/hu.json b/frontend/src/i18n/locales/hu.json
+index 2e95014..27d5026 100644
+--- a/frontend/src/i18n/locales/hu.json
++++ b/frontend/src/i18n/locales/hu.json
+@@ -381,7 +381,11 @@
+     "username_reserved": "Ez a felhasználónév le van foglalva.",
+     "username_taken": "Ez a felhasználónév már foglalt.",
+     "validation_error": "A megadott adatok érvénytelenek.",
+-    "voice_channel_full": "A hangcsatorna megtelt."
++    "voice_channel_full": "A hangcsatorna megtelt.",
++    "attachment_invalid": "Ez a melléklet érvénytelen, lejárt vagy nem ehhez a beszélgetéshez tartozik.",
++    "attachment_limit_reached": "Egy üzenethez legfeljebb {{max}} fájlt csatolhatsz.",
++    "giphy_disabled": "A GIF-keresés jelenleg nincs engedélyezve.",
++    "giphy_unavailable": "A GIPHY most nem érhető el. Próbáld újra később."
+   },
+   "forms": {
+     "add_option": "Válaszlehetőség hozzáadása",
+@@ -1003,5 +1007,26 @@
+     "verify_note": "Ha a kódok eltérnek, szakítsd meg a hívást, és jelezd a moderátoroknak.",
+     "verify_pending": "Várakozás a kapcsolatra…",
+     "verify_title": "Biztonsági kód"
++  },
++  "media": {
++    "external_title": "Külső webhely megnyitása",
++    "external_warning": "Ez a hivatkozás a PollákCordon kívüli webhelyet nyit meg. Az oldal veszélyes lehet: adathalászatot, kártevőt vagy megtévesztő tartalmat is tartalmazhat. Csak akkor folytasd, ha megbízol a címben.",
++    "continue": "Folytatás új lapon",
++    "attach": "Fájl csatolása",
++    "pending": "Csatolt fájlok és GIF",
++    "remove": "{{filename}} eltávolítása",
++    "remove_gif": "GIF eltávolítása",
++    "uploading": "{{filename}} feltöltése: {{percent}}%",
++    "limit": "Legfeljebb {{size}} fájlonként",
++    "download": "Letöltés",
++    "giphy_title": "GIF keresése a GIPHY-n",
++    "giphy_search": "GIF keresőkifejezés",
++    "search": "Keresés",
++    "giphy_rating": "Iskolai szűrés: legfeljebb PG besorolás.",
++    "giphy_insert": "{{title}} GIF beszúrása",
++    "giphy_empty": "Nincs találat. Próbálj másik keresőkifejezést.",
++    "giphy_powered": "Powered by GIPHY",
++    "giphy_selected": "GIPHY GIF kiválasztva",
++    "giphy_unavailable": "Ez a GIF most nem jeleníthető meg."
+   }
+ }
+diff --git a/frontend/src/styles/chat.css b/frontend/src/styles/chat.css
+index ca6b4dc..e67fbe2 100644
+--- a/frontend/src/styles/chat.css
++++ b/frontend/src/styles/chat.css
+@@ -831,3 +831,163 @@
+     order: 3;
+   }
+ }
++.external-link-url {
++  overflow-wrap: anywhere;
++  padding: 0.75rem;
++  border: 1px solid var(--border);
++  border-radius: var(--radius);
++  background: var(--paper-2);
++}
++
++.link-embeds {
++  display: grid;
++  gap: 0.6rem;
++  max-width: 540px;
++}
++
++.link-embed {
++  display: flex;
++  margin-top: 0.5rem;
++  overflow: hidden;
++  border: 1px solid var(--border);
++  border-left: 4px solid var(--accent);
++  border-radius: var(--radius);
++  background: var(--paper-2);
++  color: inherit;
++  text-decoration: none;
++}
++
++.link-embed__body {
++  display: grid;
++  gap: 0.35rem;
++  padding: 0.8rem;
++  min-width: 0;
++  overflow-wrap: anywhere;
++}
++
++.link-embed__host {
++  display: flex;
++  align-items: center;
++  gap: 0.4rem;
++  font-size: 0.8rem;
++}
++
++.link-embed__description {
++  font-size: 0.9rem;
++  white-space: normal;
++}
++
++.link-embed__image {
++  width: 110px;
++  max-width: 30%;
++  object-fit: cover;
++  align-self: stretch;
++}
++
++.message-attachment {
++  margin-top: 0.6rem;
++  width: fit-content;
++  max-width: 100%;
++  overflow: hidden;
++  border: 1px solid var(--border);
++  border-radius: var(--radius);
++  background: var(--paper-2);
++}
++
++.message-attachment img,
++.message-attachment video,
++.message-gif img {
++  display: block;
++  max-width: min(100%, 520px);
++  max-height: 360px;
++  object-fit: contain;
++}
++
++.message-attachment__download {
++  display: grid;
++  gap: 0.25rem;
++  padding: 0.65rem;
++  overflow-wrap: anywhere;
++}
++
++.message-attachment__download span,
++.message-gif figcaption,
++.giphy-attribution {
++  font-size: 0.8rem;
++}
++
++.message-gif {
++  margin: 0.6rem 0;
++}
++
++.composer-attachments {
++  display: grid;
++  gap: 0.35rem;
++  list-style: none;
++  padding: 0.5rem;
++  margin: 0;
++}
++
++.composer-attachments li {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.5rem;
++  overflow-wrap: anywhere;
++}
++
++.composer-upload {
++  display: grid;
++  padding: 0.5rem;
++  overflow-wrap: anywhere;
++}
++
++.composer-upload progress {
++  width: 100%;
++  accent-color: var(--accent);
++}
++
++.giphy-search {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
++}
++
++.giphy-search label {
++  width: 100%;
++}
++
++.giphy-search input {
++  flex: 1;
++  min-width: 120px;
++}
++
++.giphy-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
++  gap: 0.5rem;
++  max-height: 50vh;
++  overflow-y: auto;
++}
++
++.giphy-result {
++  display: grid;
++  align-content: start;
++  gap: 0.25rem;
++  padding: 0.25rem;
++  background: var(--paper-2);
++  border: 1px solid var(--border);
++  border-radius: var(--radius);
++  color: inherit;
++}
++
++.giphy-result img {
++  width: 100%;
++  height: 120px;
++  object-fit: contain;
++}
++
++.giphy-result span {
++  font-size: 0.75rem;
++  overflow-wrap: anywhere;
++}
+diff --git a/frontend/src/test/client.test.ts b/frontend/src/test/client.test.ts
+index 7f6580e..5fa4213 100644
+--- a/frontend/src/test/client.test.ts
++++ b/frontend/src/test/client.test.ts
+@@ -85,6 +85,51 @@ describe("api client", () => {
+     expect(init.body).toBeInstanceOf(FormData);
+     expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+   });
++
++  it("sends scoped progress uploads with CSRF and cancels them through AbortSignal", async () => {
++    const instances: FakeUpload[] = [];
++    class FakeUpload {
++      upload: { onprogress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void } = {};
++      headers: Record<string, string> = {};
++      status = 200;
++      responseText = '{"id":"123"}';
++      withCredentials = false;
++      timeout = 0;
++      url = "";
++      onload?: () => void;
++      onabort?: () => void;
++      onerror?: () => void;
++      ontimeout?: () => void;
++      open(_method: string, url: string) { this.url = url; }
++      setRequestHeader(key: string, value: string) { this.headers[key] = value; }
++      send(form: FormData) {
++        expect(form.get("file")).toBeInstanceOf(File);
++        instances.push(this);
++      }
++      abort() { this.onabort?.(); }
++    }
++    fetchMock.mockResolvedValue(json({ csrf_token: "upload-token" }));
++    vi.stubGlobal("XMLHttpRequest", FakeUpload);
++    const progress = vi.fn();
++    const controller = new AbortController();
++    const upload = api.upload("/uploads/attachments", new File(["x"], "x.txt"), { query: { scope: "dm", scope_id: "7" }, onProgress: progress, signal: controller.signal });
++    await vi.waitFor(() => expect(instances).toHaveLength(1));
++    const xhr = instances[0];
++    expect(xhr.url).toBe("/api/v1/uploads/attachments?scope=dm&scope_id=7");
++    expect(xhr.headers["X-CSRF-Token"]).toBe("upload-token");
++    expect(xhr.headers["Content-Type"]).toBeUndefined();
++    expect(xhr.withCredentials).toBe(true);
++    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
++    expect(progress).toHaveBeenLastCalledWith(50);
++    xhr.onload?.();
++    await expect(upload).resolves.toEqual({ id: "123" });
++    expect(progress).toHaveBeenLastCalledWith(100);
++    const cancelled = api.upload("/uploads/attachments", new File(["x"], "x.txt"), { onProgress: progress, signal: controller.signal });
++    const rejection = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
++    await vi.waitFor(() => expect(instances).toHaveLength(2));
++    controller.abort();
++    await rejection;
++  });
+ });
+ 
+ class FakeSocket {
+diff --git a/frontend/src/test/media.test.tsx b/frontend/src/test/media.test.tsx
+new file mode 100644
+index 0000000..0d3fc78
+--- /dev/null
++++ b/frontend/src/test/media.test.tsx
+@@ -0,0 +1,199 @@
++import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
++import userEvent from "@testing-library/user-event";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++vi.mock("../api/client", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("../api/client")>();
++  return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), del: vi.fn(), upload: vi.fn() } };
++});
++
++import { ApiError, api } from "../api/client";
++import { loadGiphy, searchGiphy } from "../api/giphy";
++import type { Attachment, MediaConfig } from "../api/types";
++import { SafeLink } from "../components/SafeLink";
++import { Composer } from "../components/chat/Composer";
++import { GiphyPicker } from "../components/chat/GiphyPicker";
++import { LinkEmbeds, MessageMedia } from "../components/chat/MessageMedia";
++import { RichText } from "../components/chat/RichText";
++import { ClassSpaceText } from "../components/classspace/ClassSpaceText";
++import { DokText } from "../components/dok/DokText";
++import { isExternalUrl, useLinkPolicy } from "../utils/links";
++import { renderApp, resetLanguage, signIn } from "./helpers";
++
++const mockApi = vi.mocked(api);
++const config: MediaConfig = { public_origin: "https://chat.school.hu", max_attachment_bytes: 20_000_000, max_attachments: 10, giphy_api_key: null, giphy_rating: "pg" };
++const attachment: Attachment = { id: "123", filename: "órarend.pdf", size_bytes: 1000, mime_type: "application/pdf", kind: "file", url: "/api/v1/uploads/attachments/123" };
++const giphy = {
++  id: "SchoolGif", title: "Happy school", rating: "pg", username: "SchoolArtist",
++  images: { downsized: { url: "https://media.giphy.com/media/SchoolGif/giphy.gif?cid=keep" }, fixed_width_small: { url: "https://media1.giphy.com/media/SchoolGif/100w.gif" } },
++};
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  resetLanguage();
++  signIn();
++  useLinkPolicy.setState({ publicOrigin: "https://chat.school.hu" });
++  mockApi.get.mockResolvedValue(config);
++  mockApi.del.mockResolvedValue({ status: "deleted" });
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++  useLinkPolicy.setState({ publicOrigin: null });
++});
++
++function composerProps() {
++  return {
++    placeholder: "Üzenet", disabledReason: null, maxLength: 4000, typingTarget: { scope: "channel" as const, id: "9" },
++    replyTo: null, onCancelReply: vi.fn(), onSend: vi.fn().mockResolvedValue(undefined), candidates: [], mediaConfig: config,
++  };
++}
++
++describe("external link warnings", () => {
++  it("compares parsed origins including scheme and port", () => {
++    expect(isExternalUrl("https://chat.school.hu/app", config.public_origin)).toBe(false);
++    for (const url of ["http://chat.school.hu/app", "https://chat.school.hu:8443/app", "https://chat.school.hu.evil.com", "https://chat.school.hu@evil.com"] ) {
++      expect(isExternalUrl(url, config.public_origin)).toBe(true);
++    }
++  });
++
++  it.each(["chat", "dok", "class-space"])("warns before activating %s links and supports cancel, keyboard, and focus trapping", async (scope) => {
++    const user = userEvent.setup();
++    const content = "https://example.com/test";
++    render(scope === "chat" ? <RichText content={content} names={{}} /> : scope === "dok" ? <DokText content={content} /> : <ClassSpaceText content={content} />);
++    const link = screen.getByRole("link", { name: content });
++    expect(fireEvent.click(link, { ctrlKey: true })).toBe(false);
++    const dialog = screen.getByRole("dialog", { name: "Külső webhely megnyitása" });
++    const cancel = within(dialog).getByRole("button", { name: "Mégse" });
++    expect(cancel).toHaveFocus();
++    expect(dialog).toHaveTextContent("adathalászatot");
++    const continuation = within(dialog).getByRole("link", { name: "Folytatás új lapon" });
++    expect(continuation).toHaveAttribute("href", content);
++    expect(continuation).toHaveAttribute("target", "_blank");
++    expect(continuation).toHaveAttribute("rel", "noopener noreferrer");
++    continuation.focus();
++    await user.tab();
++    expect(within(dialog).getByRole("button", { name: "Bezárás" })).toHaveFocus();
++    await user.click(cancel);
++    expect(screen.queryByRole("dialog")).toBeNull();
++    link.focus();
++    await user.keyboard("{Enter}");
++    expect(screen.getByRole("dialog")).toBeInTheDocument();
++    await user.keyboard("{Escape}");
++    expect(screen.queryByRole("dialog")).toBeNull();
++    expect(link).toHaveFocus();
++  });
++
++  it("leaves same-origin links normal and blocks middle-click bypasses", () => {
++    render(<><SafeLink href="https://chat.school.hu/app">App</SafeLink><SafeLink href="https://example.com">External</SafeLink></>);
++    const local = screen.getByRole("link", { name: "App" });
++    expect(fireEvent.click(local)).toBe(true);
++    expect(screen.queryByRole("dialog")).toBeNull();
++    fireEvent(screen.getByRole("link", { name: "External" }), new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
++    expect(screen.getByRole("dialog")).toBeInTheDocument();
++  });
++
++  it("uses the same warning for embed cards and never loads arbitrary remote preview images", () => {
++    const { container } = render(<LinkEmbeds embeds={[{ url: "https://example.com", title: "School news", host: "example.com", image: "http://127.0.0.1/private" }]} />);
++    expect(container.querySelector("img")).toBeNull();
++    fireEvent.click(screen.getByRole("link", { name: /School news/ }));
++    expect(screen.getByRole("dialog")).toBeInTheDocument();
++  });
++});
++
++describe("file composers and attachments", () => {
++  it("shows no Giphy entry point without a configured key", () => {
++    render(<Composer {...composerProps()} />);
++    expect(screen.getByRole("button", { name: "Fájl csatolása" })).toBeInTheDocument();
++    expect(screen.queryByRole("button", { name: "GIF keresése a GIPHY-n" })).toBeNull();
++  });
++
++  it("uploads with scope and progress, sends an attachment-only message, and clears the draft", async () => {
++    const props = composerProps();
++    mockApi.upload.mockImplementation(async (_path, _file, options) => {
++      options?.onProgress?.(75);
++      return attachment;
++    });
++    const { container } = render(<Composer {...props} />);
++    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["pdf"], attachment.filename)] } });
++    await screen.findByText(/órarend.pdf · 1.0 kB/);
++    expect(mockApi.upload).toHaveBeenCalledWith("/uploads/attachments", expect.any(File), expect.objectContaining({ query: { scope: "channel", scope_id: "9" }, signal: expect.any(AbortSignal), onProgress: expect.any(Function) }));
++    await userEvent.click(screen.getByRole("button", { name: "Küldés" }));
++    expect(props.onSend).toHaveBeenCalledWith("", null, { attachmentIds: ["123"], giphyId: null });
++    await waitFor(() => expect(screen.queryByText(/órarend.pdf ·/)).toBeNull());
++    expect(mockApi.del).not.toHaveBeenCalled();
++  });
++
++  it("rejects oversized files before upload and respects disabled send permissions", async () => {
++    const props = composerProps();
++    const { container, rerender } = render(<Composer {...props} mediaConfig={{ ...config, max_attachment_bytes: 2 }} />);
++    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["big"], "file.txt")] } });
++    expect(await screen.findByRole("alert")).toHaveTextContent("A fájl túl nagy");
++    expect(mockApi.upload).not.toHaveBeenCalled();
++    rerender(<Composer {...props} disabledReason="Nincs jogosultságod" />);
++    expect(screen.getByRole("button", { name: "Fájl csatolása" })).toBeDisabled();
++  });
++
++  it("keeps attachments after send failure and removes pending uploads on discard", async () => {
++    const props = composerProps();
++    props.onSend.mockRejectedValue(new ApiError(403, "forbidden", "forbidden"));
++    mockApi.upload.mockResolvedValue(attachment);
++    const { container } = render(<Composer {...props} />);
++    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["pdf"], attachment.filename)] } });
++    await screen.findByText(/órarend.pdf ·/);
++    await userEvent.click(screen.getByRole("button", { name: "Küldés" }));
++    expect(await screen.findByRole("alert")).toBeInTheDocument();
++    expect(screen.getByText(/órarend.pdf ·/)).toBeInTheDocument();
++    await userEvent.click(screen.getByRole("button", { name: "órarend.pdf eltávolítása" }));
++    expect(mockApi.del).toHaveBeenCalledWith("/uploads/attachments/123");
++  });
++
++  it("renders file metadata and safe previews only through authenticated application URLs", () => {
++    const { container } = render(<MessageMedia attachments={[attachment, { ...attachment, id: "124", filename: "video.mp4", mime_type: "video/mp4", kind: "video", url: "/api/v1/uploads/attachments/124" }, { ...attachment, id: "125", kind: "image", url: "https://evil.com/image" }]} />);
++    expect(screen.getByText(attachment.filename)).toBeInTheDocument();
++    expect(screen.getByText(/1.0 kB · application\/pdf/)).toBeInTheDocument();
++    expect(container.querySelector("video")).toHaveAttribute("src", "/api/v1/uploads/attachments/124?inline=true");
++    expect(container.querySelector("img")).toBeNull();
++  });
++});
++
++describe("GIPHY official API", () => {
++  it("uses direct requests with pg filtering, no cookies, and unmodified media URLs", async () => {
++    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [giphy] }), { status: 200 }));
++    vi.stubGlobal("fetch", fetcher);
++    const found = await searchGiphy("browser-key", "iskola", "hu");
++    const [url, options] = fetcher.mock.calls[0];
++    expect(url.origin).toBe("https://api.giphy.com");
++    expect(url.searchParams.get("rating")).toBe("pg");
++    expect(url.searchParams.get("q")).toBe("iskola");
++    expect(options).toMatchObject({ credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
++    expect(found[0].image).toBe(giphy.images.downsized.url);
++    expect(await searchGiphy("", "iskola", "hu")).toEqual([]);
++    expect(fetcher).toHaveBeenCalledTimes(1);
++  });
++
++  it("rejects adult ratings and forged media hosts and resolves saved IDs with a rating filter", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ ...giphy, rating: "r" }, { ...giphy, images: { downsized: { url: "https://evil.com/x.gif" } } }] }), { status: 200 })));
++    expect(await loadGiphy("browser-key", "SchoolGif")).toBeNull();
++    expect(new URL(vi.mocked(fetch).mock.calls[0][0].toString()).searchParams.get("ids")).toBe("SchoolGif");
++  });
++
++  it("searches, attributes, and inserts a chosen GIF", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [giphy] }), { status: 200 })));
++    const choose = vi.fn();
++    render(<GiphyPicker apiKey="browser-key" onChoose={choose} onClose={vi.fn()} />);
++    await userEvent.type(screen.getByLabelText("GIF keresőkifejezés"), "iskola");
++    await userEvent.click(screen.getByRole("button", { name: "Keresés" }));
++    await userEvent.click(await screen.findByRole("button", { name: "Happy school GIF beszúrása" }));
++    expect(choose).toHaveBeenCalledWith("SchoolGif");
++    expect(screen.getByText("Powered by GIPHY")).toBeInTheDocument();
++  });
++
++  it("keeps a failed Giphy lookup graceful and displays a localized error", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
++    renderApp(<GiphyPicker apiKey="browser-key" onChoose={vi.fn()} onClose={vi.fn()} />);
++    await userEvent.type(screen.getByLabelText("GIF keresőkifejezés"), "iskola");
++    await userEvent.click(screen.getByRole("button", { name: "Keresés" }));
++    expect(await screen.findByRole("alert")).toHaveTextContent("A GIPHY most nem érhető el");
++  });
++});
+diff --git a/frontend/src/utils/links.ts b/frontend/src/utils/links.ts
+new file mode 100644
+index 0000000..c2049c9
+--- /dev/null
++++ b/frontend/src/utils/links.ts
+@@ -0,0 +1,24 @@
++import { create } from "zustand";
++
++export const useLinkPolicy = create<{ publicOrigin: string | null; setPublicOrigin: (origin: string) => void }>((set) => ({
++  publicOrigin: null,
++  setPublicOrigin: (origin) => {
++    try {
++      const url = new URL(origin);
++      if (url.protocol === "https:" || url.protocol === "http:") {
++        set({ publicOrigin: url.origin });
++      }
++    } catch {
++      return;
++    }
++  },
++}));
++
++export function isExternalUrl(value: string, publicOrigin = window.location.origin): boolean {
++  try {
++    const url = new URL(value);
++    return (url.protocol === "https:" || url.protocol === "http:") && url.origin !== new URL(publicOrigin).origin;
++  } catch {
++    return false;
++  }
++}

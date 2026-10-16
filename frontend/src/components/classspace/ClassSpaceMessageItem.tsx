@@ -6,6 +6,7 @@ import { formatDateTime, formatTime } from "../../utils/format";
 import { Avatar } from "../Avatar";
 import { Icon } from "../Icon";
 import { ClassSpaceText } from "./ClassSpaceText";
+import { LinkEmbeds } from "../chat/MessageMedia";
 
 interface ClassSpaceMessageItemProps {
   message: ClassSpaceMessage;
@@ -36,6 +37,7 @@ export function ClassSpaceMessageItem({ message, onDelete, onReport }: ClassSpac
           <div className="message__content">
             <ClassSpaceText content={message.content} />
           </div>
+          <LinkEmbeds embeds={message.embeds} />
         </div>
         <div className="message__tools" role="toolbar" aria-label={t("a11y.message_actions")}>
           {message.mine ? (

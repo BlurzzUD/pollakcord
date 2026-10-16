@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
-import { useMeta } from "../../api/hooks";
+import { useMediaConfig, useMeta } from "../../api/hooks";
 import type { Message } from "../../api/types";
 import { useAuth } from "../../store/auth";
 import { useLive } from "../../store/live";
@@ -42,6 +42,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
   const push = useUi((state) => state.push);
   const meId = useAuth((state) => state.me?.id);
   const meta = useMeta();
+  const mediaConfig = useMediaConfig();
   const typing = useLive((state) => state.typing[`${scope}:${id}`]);
   const [tick, setTick] = useState(0);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -227,6 +228,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
         onCancelReply={() => setReplyTo(null)}
         onSend={timeline.send}
         candidates={candidates}
+        mediaConfig={mediaConfig.data}
       />
       {reporting ? <ReportDialog base={timeline.base} messageId={reporting.id} allowEscalate={allowEscalate} onClose={() => setReporting(null)} /> : null}
       {deleting ? (

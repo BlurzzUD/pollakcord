@@ -66,6 +66,8 @@ class Message(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     pinned_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     pinned_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    media_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    media_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class MessageContent(Base):

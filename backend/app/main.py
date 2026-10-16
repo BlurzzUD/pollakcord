@@ -25,6 +25,7 @@ from .services.class_spaces import ClassSpaceService
 from .services.dok import DokService
 from .services.forms import FormService
 from .services.messages import MessageService
+from .services.link_embeds import EmbedService
 from .services.uploads import media_path
 from .spa import mount_frontend
 
@@ -67,10 +68,11 @@ def create_app(settings: Settings | None = None, kreta_adapter: KretaAuthPort | 
         app.state.limiter = RateLimiter(settings.rate_limit_enabled)
         app.state.hub = hub
         app.state.voice = VoiceManager(settings.voice_max_participants)
-        app.state.messages = MessageService(vault, settings)
-        app.state.dok = DokService(vault, settings)
+        embeds = EmbedService(settings)
+        app.state.messages = MessageService(vault, settings, embeds)
+        app.state.dok = DokService(vault, settings, embeds)
         app.state.forms = FormService(vault)
-        app.state.class_spaces = ClassSpaceService(vault, settings)
+        app.state.class_spaces = ClassSpaceService(vault, settings, embeds)
         app.state.kreta_flows = flows
         from .realtime.ws import install_revalidator
 

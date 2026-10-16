@@ -18,6 +18,8 @@ from . import people
 from .messages import clean_content
 from .notifications import notify
 from .serializers import iso, sid
+from .link_embeds import EmbedService
+from .message_media import open_media, seal_media
 
 logger = get_logger("pollakcord.dok")
 PURPOSE = "dok-message"
@@ -80,9 +82,10 @@ def class_target(school_class: SchoolClass) -> dict[str, Any]:
 
 
 class DokService:
-    def __init__(self, vault: Vault, settings: Settings) -> None:
+    def __init__(self, vault: Vault, settings: Settings, embeds: EmbedService | None = None) -> None:
         self._vault = vault
         self._max_length = settings.message_max_length
+        self._embeds = embeds or EmbedService(settings)
 
     @staticmethod
     def _aad(message_id: int, thread_id: int) -> bytes:
@@ -127,10 +130,12 @@ class DokService:
 
     async def send(self, db: AsyncSession, target: Target, author: User, content: str) -> tuple[DokThread, DokMessage]:
         text = clean_content(content, self._max_length)
+        embeds = await self._embeds.build(text)
         thread = await self._thread_for(db, target, author.id)
         message_id = new_id()
         body_enc, key_id = self._vault.encrypt(PURPOSE, text.encode("utf-8"), self._aad(message_id, thread.id))
         message = DokMessage(id=message_id, thread_id=thread.id, author_id=author.id, author_role=author.platform_role, body_enc=body_enc, key_id=key_id)
+        message.media_enc, message.media_key_id = seal_media(self._vault, f"dok|{thread.id}", message_id, embeds)
         db.add(message)
         thread.last_message_at = utcnow()
         await db.flush()
@@ -201,6 +206,7 @@ class DokService:
                     "author": cards.get(message.author_id) if message.author_id in visible else None,
                     "mine": message.author_id == viewer.id,
                     "content": self._open(message) or "",
+                    "embeds": open_media(self._vault, f"dok|{thread.id}", message.id, message.media_enc, message.media_key_id)["embeds"],
                     "created_at": iso(message.created_at),
                 }
             )
